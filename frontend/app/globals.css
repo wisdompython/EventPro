@@ -1,0 +1,172 @@
+@import "tailwindcss";
+
+:root {
+  /* ── Ops console palette (light) ── */
+  --bg:           #f6f4ee;          /* page / main content background */
+  --panel:        #ffffff;          /* card / panel background */
+  --panel-2:      #f1eee6;          /* slightly elevated panel */
+  --ink:          #23262e;          /* primary text */
+  --ink-2:        #3d434f;
+  --muted:        #6b7280;          /* secondary / label text */
+  --muted-2:      #9aa1ad;          /* tertiary / placeholder */
+  --line:         rgba(23,26,33,0.10);   /* dividers */
+  --line-2:       rgba(23,26,33,0.06);
+  --line-strong:  rgba(23,26,33,0.20);   /* dashed / emphasised borders */
+  --chip:         rgba(23,26,33,0.05);   /* subtle fills, chips, hovers */
+  --field:        #ffffff;          /* input / select background */
+
+  --brand:        #8a6f2b;          /* TWS gold, darkened for light bg */
+  --brand-strong: #6f5920;
+  --brand-soft:   rgba(184,150,62,0.16);
+
+  --sidebar:      #f0ede5;          /* sidebar background */
+  --sidebar-2:    rgba(23,26,33,0.05);   /* nav item hover */
+  --sidebar-line: rgba(23,26,33,0.08);
+
+  --success:      #0e8f6b;
+  --success-bg:   rgba(14,143,107,0.12);
+  --warn:         #b45309;
+  --warn-bg:      rgba(180,83,9,0.12);
+  --danger:       #dc2626;
+  --danger-bg:    rgba(220,38,38,0.10);
+  --info:         #2563eb;
+  --info-bg:      rgba(37,99,235,0.10);
+
+  --font-sans:    var(--loaded-sans, 'Inter', 'Segoe UI', system-ui, sans-serif);
+  --font-display: var(--loaded-sans, 'Inter', 'Segoe UI', system-ui, sans-serif);
+  --font-mono:    'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+html {
+  font-size: 16px; /* 1rem = 16px — scales all rem-based Tailwind sizes up */
+}
+
+body {
+  background: var(--bg);
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem; /* 15px body base */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(184, 150, 62, 0.20);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Live pulse dot */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+.live-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(23,26,33,0.18); border-radius: 2px; }
+
+/* QR scan line animation */
+@keyframes scan-line {
+  0%   { top: 10%; }
+  50%  { top: 90%; }
+  100% { top: 10%; }
+}
+.animate-scan-line {
+  animation: scan-line 2s ease-in-out infinite;
+  position: absolute;
+}
+
+/* Shared admin-form language */
+.form-control {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(23,26,33,0.14);
+  border-radius: 12px;
+  background: var(--field);
+  color: var(--ink);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.form-control:hover {
+  border-color: rgba(23,26,33,0.24);
+}
+
+.form-control:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(184,150,62,0.18);
+  background: var(--field);
+}
+
+.form-control::placeholder {
+  color: var(--muted-2);
+}
+
+.form-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+select.form-control,
+input[type="date"].form-control,
+input[type="datetime-local"].form-control {
+  color-scheme: light;
+}
+
+textarea.form-control {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.form-hint {
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.form-card {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel);
+}
+
+.form-choice {
+  display: block;
+  padding: 1rem;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg);
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.form-choice:hover {
+  border-color: rgba(184,150,62,0.45);
+  transform: translateY(-1px);
+}
+
+.form-choice--selected,
+.form-choice[data-selected="true"] {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}

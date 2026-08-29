@@ -1,0 +1,1438 @@
+import io
+import zipfile
+from unittest.mock import patch
+
+from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
+from PIL import Image, ImageDraw
+from rest_framework.test import APIClient
+from rest_framework import status
+
+from accounts.models import User
+from .models import Event, Guest
+
+
+class PassNameContrastTests(SimpleTestCase):
+    def test_low_contrast_name_gets_readability_outline(self):
+        from .utils.color import _average_zone_color, _draw_name_in_zone
+
+        artwork = Image.new('RGB', (320, 120), (245, 240, 225))
+        zone = {'x': 10, 'y': 10, 'w': 300, 'h': 100}
+        _draw_name_in_zone(
+            ImageDraw.Draw(artwork),
+            'Wisdom',
+            zone,
+            None,
+            '#ffffff',
+            48,
+            background_color=_average_zone_color(artwork, zone),
+        )
+
+        # White text on a cream panel should gain dark outline pixels.
+        self.assertTrue(any(max(pixel) < 80 for pixel in artwork.getdata()))
+
+
+def make_event(**kwargs):
+    defaults = dict(name='Test Event', date=timezone.now() + timezone.timedelta(days=7))
+    defaults.update(kwargs)
+    return Event.objects.create(**defaults)
+
+
+def make_guest(event, **kwargs):
+    defaults = dict(full_name='Test Guest', phone_number='2348000000001')
+    defaults.update(kwargs)
+    return Guest.objects.create(event=event, **defaults)
+
+
+class WhatsAppTemplateVariableTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user(
+            'template-manager', password='pass', role='event_manager'
+        )
+        self.client.force_authenticate(self.manager)
+
+    def test_available_variables_include_rsvp_link(self):
+        response = self.client.get('/api/whatsapp-templates/available-vars/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn(
+            {'key': 'rsvp_link', 'label': 'Guest-specific RSVP link'},
+            response.data,
+        )
+        self.assertIn(
+            {'key': 'rsvp_deadline', 'label': 'RSVP response deadline'},
+            response.data,
+        )
+
+
+class EventDeliveryWorkflowTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user('event-flow-manager', password='pass', role='event_manager')
+        self.client.force_authenticate(self.manager)
+
+    def test_event_creation_can_reserve_an_rsvp_workflow(self):
+        from rsvp.models import RsvpWorkflow
+
+        response = self.client.post('/api/events/', {
+            'name': 'RSVP Event',
+            'date': (timezone.now() + timezone.timedelta(days=10)).isoformat(),
+            'create_rsvp_workflow': True,
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        workflow = RsvpWorkflow.objects.get(event_id=response.data['id'])
+        self.assertEqual(workflow.status, RsvpWorkflow.Status.DRAFT)
+        self.assertEqual(workflow.created_by, self.manager)
+        self.assertEqual(response.data['rsvp_workflow_id'], workflow.id)
+        self.assertTrue(response.data['rsvp_enabled'])
+
+    def test_direct_event_does_not_create_an_rsvp_workflow(self):
+        from rsvp.models import RsvpWorkflow
+
+        response = self.client.post('/api/events/', {
+            'name': 'Direct Event',
+            'date': (timezone.now() + timezone.timedelta(days=10)).isoformat(),
+            'create_rsvp_workflow': False,
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertFalse(RsvpWorkflow.objects.filter(event_id=response.data['id']).exists())
+        self.assertIsNone(response.data['rsvp_workflow_id'])
+        self.assertFalse(response.data['rsvp_enabled'])
+
+    def test_event_can_enable_plus_ones_and_reports_estimated_guests(self):
+        event = make_event(name='Plus One Event', allow_plus_one=True)
+        make_guest(event, full_name='Guest One', plus_one_attending=True)
+        make_guest(event, full_name='Guest Two')
+
+        response = self.client.get(f'/api/events/{event.id}/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['allow_plus_one'])
+        self.assertEqual(response.data['guest_count'], 2)
+        self.assertEqual(response.data['plus_one_count'], 1)
+        self.assertEqual(response.data['estimated_guest_count'], 3)
+
+    def test_rsvp_event_estimate_uses_only_confirmed_guests_and_their_plus_ones(self):
+        from rsvp.models import RsvpRecipient, RsvpWorkflow
+
+        event = make_event(name='RSVP Estimate', allow_plus_one=True, rsvp_enabled=True)
+        confirmed = make_guest(event, full_name='Confirmed', plus_one_attending=True)
+        awaiting = make_guest(event, full_name='Awaiting')
+        declined = make_guest(event, full_name='Declined')
+        workflow = RsvpWorkflow.objects.create(event=event)
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=confirmed,
+            response_status=RsvpRecipient.ResponseStatus.CONFIRMED,
+        )
+        RsvpRecipient.objects.create(workflow=workflow, guest=awaiting)
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=declined,
+            response_status=RsvpRecipient.ResponseStatus.DECLINED,
+        )
+
+        response = self.client.get(f'/api/events/{event.id}/')
+
+        self.assertEqual(response.data['guest_count'], 3)
+        self.assertEqual(response.data['confirmed_count'], 1)
+        self.assertEqual(response.data['plus_one_count'], 1)
+        self.assertEqual(response.data['estimated_guest_count'], 2)
+
+    def test_named_plus_one_is_not_double_counted_after_confirming(self):
+        from rsvp.models import RsvpRecipient, RsvpWorkflow
+        from .plus_one import upsert_named_plus_one
+
+        event = make_event(allow_plus_one=True, rsvp_enabled=True)
+        primary = make_guest(event, full_name='Primary', phone_number='2348000000001')
+        plus_one, _, _ = upsert_named_plus_one(
+            primary, 'Named Companion', '2348000000002',
+        )
+        workflow = RsvpWorkflow.objects.create(event=event)
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=primary,
+            response_status=RsvpRecipient.ResponseStatus.CONFIRMED,
+        )
+        plus_one_recipient = RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=plus_one,
+        )
+
+        awaiting_response = self.client.get(f'/api/events/{event.id}/')
+        self.assertEqual(awaiting_response.data['confirmed_count'], 1)
+        self.assertEqual(awaiting_response.data['plus_one_count'], 1)
+        self.assertEqual(awaiting_response.data['estimated_guest_count'], 2)
+
+        plus_one_recipient.response_status = RsvpRecipient.ResponseStatus.CONFIRMED
+        plus_one_recipient.save(update_fields=['response_status'])
+        confirmed_response = self.client.get(f'/api/events/{event.id}/')
+        self.assertEqual(confirmed_response.data['confirmed_count'], 2)
+        self.assertEqual(confirmed_response.data['plus_one_count'], 1)
+        self.assertEqual(confirmed_response.data['estimated_guest_count'], 2)
+
+
+class GuestListFilterTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user('mgr', password='pass', role='event_manager')
+        self.client.force_authenticate(self.manager)
+        self.event_a = make_event(name='Event A')
+        self.event_b = make_event(name='Event B')
+        self.g1 = make_guest(self.event_a, full_name='Alice')
+        self.g2 = make_guest(self.event_a, full_name='Bob', whatsapp_sent=True, status='checked_in')
+        self.g3 = make_guest(self.event_b, full_name='Carol')
+
+    def test_event_filter_returns_only_that_events_guests(self):
+        r = self.client.get('/api/guests/', {'event': self.event_a.id})
+        self.assertEqual(r.status_code, 200)
+        names = {g['full_name'] for g in r.data['results']}
+        self.assertEqual(names, {'Alice', 'Bob'})
+        self.assertNotIn('Carol', names)
+
+    def test_no_event_filter_returns_all(self):
+        r = self.client.get('/api/guests/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['count'], 3)
+
+    def test_wa_sent_false_filter(self):
+        r = self.client.get('/api/guests/', {'event': self.event_a.id, 'wa_sent': 'false'})
+        names = {g['full_name'] for g in r.data['results']}
+        self.assertEqual(names, {'Alice'})
+
+    def test_wa_sent_true_filter(self):
+        r = self.client.get('/api/guests/', {'event': self.event_a.id, 'wa_sent': 'true'})
+        names = {g['full_name'] for g in r.data['results']}
+        self.assertEqual(names, {'Bob'})
+
+    def test_response_includes_stats(self):
+        r = self.client.get('/api/guests/', {'event': self.event_a.id})
+        self.assertIn('stats', r.data)
+        stats = r.data['stats']
+        self.assertEqual(stats['checked_in'], 1)
+        self.assertEqual(stats['pending'], 1)
+        self.assertEqual(stats['wa_sent'], 1)
+        self.assertEqual(stats['wa_unsent'], 1)
+
+    def test_search_filter(self):
+        r = self.client.get('/api/guests/', {'event': self.event_a.id, 'search': 'ali'})
+        names = {g['full_name'] for g in r.data['results']}
+        self.assertEqual(names, {'Alice'})
+
+    def test_status_filter(self):
+        r = self.client.get('/api/guests/', {'event': self.event_a.id, 'status': 'checked_in'})
+        names = {g['full_name'] for g in r.data['results']}
+        self.assertEqual(names, {'Bob'})
+
+    def test_csv_export_escapes_spreadsheet_formulas(self):
+        self.g1.full_name = '=HYPERLINK("https://example.com")'
+        self.g1.save(update_fields=['full_name'])
+
+        response = self.client.get('/api/guests/export/', {'event': self.event_a.id})
+        body = b''.join(response.streaming_content).decode('utf-8')
+
+        self.assertIn("'=HYPERLINK", body)
+
+
+class BulkDeleteTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user('mgr', password='pass', role='event_manager')
+        self.client.force_authenticate(self.manager)
+        self.event = make_event()
+        self.g1 = make_guest(self.event, full_name='Alice')
+        self.g2 = make_guest(self.event, full_name='Bob')
+        self.g3 = make_guest(self.event, full_name='Carol')
+
+    def test_delete_by_ids(self):
+        r = self.client.post('/api/guests/bulk-delete/', {'ids': [str(self.g1.id), str(self.g2.id)]}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['deleted'], 2)
+        self.assertFalse(Guest.objects.filter(id=self.g1.id).exists())
+        self.assertFalse(Guest.objects.filter(id=self.g2.id).exists())
+        self.assertTrue(Guest.objects.filter(id=self.g3.id).exists())
+
+    def test_delete_all_by_event_id(self):
+        r = self.client.post('/api/guests/bulk-delete/', {'event_id': self.event.id}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['deleted'], 3)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 0)
+
+    def test_empty_ids_list_deletes_nothing(self):
+        r = self.client.post('/api/guests/bulk-delete/', {'ids': []}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['deleted'], 0)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 3)
+
+    def test_missing_both_ids_and_event_id_returns_400(self):
+        r = self.client.post('/api/guests/bulk-delete/', {}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_unauthenticated_request_denied(self):
+        self.client.force_authenticate(None)
+        r = self.client.post('/api/guests/bulk-delete/', {'event_id': self.event.id}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class SendMessageTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user('mgr', password='pass', role='event_manager')
+        self.client.force_authenticate(self.manager)
+        self.event = make_event()
+        self.guest = make_guest(self.event, phone_number='2348000000001')
+        self.guest_no_phone = make_guest(self.event, full_name='No Phone', phone_number='')
+
+    def test_missing_message_returns_400(self):
+        r = self.client.post(f'/api/guests/{self.guest.id}/send_message/', {'message': ''}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_guest_without_phone_returns_400(self):
+        r = self.client.post(f'/api/guests/{self.guest_no_phone.id}/send_message/', {'message': 'Hi'}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_whatsapp_not_configured_returns_503(self):
+        with self.settings(WHATSAPP_PHONE_ID='', WHATSAPP_TOKEN=''):
+            r = self.client.post(f'/api/guests/{self.guest.id}/send_message/', {'message': 'Hello'}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertIn('not configured', r.data['detail'].lower())
+
+
+def make_csv(rows: list[dict], extra_cols: list[str] | None = None) -> io.BytesIO:
+    """Build an in-memory CSV file from a list of dicts."""
+    cols = ['full_name', 'phone_number'] + (extra_cols or [])
+    buf = io.StringIO()
+    buf.write(','.join(cols) + '\n')
+    for row in rows:
+        buf.write(','.join(str(row.get(c, '')) for c in cols) + '\n')
+    return io.BytesIO(buf.getvalue().encode())
+
+
+@patch(
+    'guests.tasks._generate_guest_assets',
+    return_value={'qr': True, 'pass': True},
+)
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+)
+class BulkUploadTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user('mgr2', password='pass', role='event_manager')
+        self.client.force_authenticate(self.manager)
+        self.event = make_event(name='Upload Event')
+
+    def _upload(self, rows, mock_task, extra_cols=None):
+        csv_file = make_csv(rows, extra_cols)
+        csv_file.name = 'guests.csv'
+        return self.client.post(
+            '/api/guests/bulk-upload/',
+            {'event': self.event.id, 'csv_file': csv_file},
+            format='multipart',
+        ), mock_task
+
+    def test_small_upload_creates_all_guests(self, mock_task):
+        rows = [{'full_name': f'Guest {i}', 'phone_number': f'23480000{i:05d}'} for i in range(10)]
+        r, _ = self._upload(rows, mock_task)
+        self.assertEqual(r.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(r.data['successful'], 10)
+        self.assertEqual(r.data['failed'], 0)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 10)
+
+    def test_bulk_upload_creates_named_plus_one_as_linked_guest(self, mock_task):
+        from rsvp.models import RsvpWorkflow
+
+        self.event.allow_plus_one = True
+        self.event.save(update_fields=['allow_plus_one'])
+        workflow = RsvpWorkflow.objects.create(
+            event=self.event,
+            status=RsvpWorkflow.Status.ACTIVE,
+        )
+        response, _ = self._upload(
+            [{
+                'full_name': 'Primary Guest',
+                'phone_number': '2348000000001',
+                'plus_one_attending': 'yes',
+                'plus_one_full_name': 'Named Companion',
+                'plus_one_phone_number': '2348000000002',
+            }],
+            mock_task,
+            extra_cols=[
+                'plus_one_attending', 'plus_one_full_name',
+                'plus_one_phone_number',
+            ],
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data['successful'], 1)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 2)
+        primary = Guest.objects.get(full_name='Primary Guest')
+        self.assertEqual(primary.named_plus_one.full_name, 'Named Companion')
+        self.assertEqual(workflow.recipients.count(), 1)
+        self.assertEqual(workflow.recipients.get().guest_id, primary.id)
+        self.assertEqual(mock_task.call_count, 2)
+
+    def test_bulk_upload_requires_named_plus_one_details(self, mock_task):
+        self.event.allow_plus_one = True
+        self.event.save(update_fields=['allow_plus_one'])
+        response, _ = self._upload(
+            [{
+                'full_name': 'Primary Guest',
+                'phone_number': '2348000000001',
+                'plus_one_attending': 'yes',
+            }],
+            mock_task,
+            extra_cols=[
+                'plus_one_attending', 'plus_one_full_name',
+                'plus_one_phone_number',
+            ],
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data['failed'], 1)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 0)
+
+    def test_large_upload_2000_guests_uses_bulk_create(self, mock_task):
+        """2000-row upload must complete and create all guests via bulk_create."""
+        rows = [{'full_name': f'Guest {i}', 'phone_number': f'23480{i:07d}'} for i in range(2000)]
+        r, _ = self._upload(rows, mock_task)
+        self.assertEqual(r.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(r.data['successful'], 2000)
+        self.assertEqual(r.data['failed'], 0)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 2000)
+
+    def test_assets_are_processed_in_background_batches(self, mock_task):
+        """generate_guest_assets.delay() must be called once per created guest."""
+        rows = [{'full_name': f'G{i}', 'phone_number': f'23480000{i:05d}'} for i in range(50)]
+        r, _ = self._upload(rows, mock_task)
+        self.assertEqual(r.status_code, status.HTTP_202_ACCEPTED)
+        # One .delay() call per guest — no more, no less
+        self.assertEqual(mock_task.call_count, 50)
+        # Every call passes a guest ID that actually exists in the DB
+        queued_ids = {call.args[0] for call in mock_task.call_args_list}
+        db_ids = set(Guest.objects.filter(event=self.event).values_list('id', flat=True))
+        db_ids_str = {str(i) for i in db_ids}
+        self.assertEqual(queued_ids, db_ids_str)
+        self.assertEqual(r.data['assets_processed'], 50)
+        self.assertEqual(r.data['status'], 'done')
+
+    def test_celery_tasks_queued_with_send_whatsapp_true(self, mock_task):
+        rows = [{'full_name': 'Alice', 'phone_number': '2348000000001'}]
+        self._upload(rows, mock_task)
+        _, kwargs = mock_task.call_args
+        self.assertTrue(kwargs.get('send_whatsapp', True))
+
+    def test_invalid_rows_reported_valid_rows_still_created(self, mock_task):
+        """Rows missing full_name go to error_report; valid rows are still inserted."""
+        rows = [
+            {'full_name': 'Valid Guest', 'phone_number': '2348000000001'},
+            {'full_name': '',            'phone_number': '2348000000002'},  # invalid
+            {'full_name': 'Another OK',  'phone_number': '2348000000003'},
+        ]
+        r, _ = self._upload(rows, mock_task)
+        self.assertEqual(r.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(r.data['successful'], 2)
+        self.assertEqual(r.data['failed'], 1)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 2)
+
+    def test_add_upload_skips_phone_numbers_already_in_event(self, mock_task):
+        make_guest(
+            self.event,
+            full_name='Existing Guest',
+            phone_number='+234 800 000 0042',
+        )
+        rows = [
+            {'full_name': 'Same Guest Again', 'phone_number': '2348000000042'},
+            {'full_name': 'New Guest', 'phone_number': '2348000000043'},
+        ]
+
+        response, _ = self._upload(rows, mock_task)
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data['successful'], 1)
+        self.assertEqual(response.data['skipped'], 1)
+        self.assertEqual(response.data['failed'], 0)
+        self.assertEqual(response.data['skipped_items'][0]['row'], 2)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 2)
+
+    def test_add_upload_skips_repeated_phone_inside_same_csv(self, mock_task):
+        rows = [
+            {'full_name': 'First Entry', 'phone_number': '08000000042'},
+            {'full_name': 'Repeated Entry', 'phone_number': '2348000000042'},
+        ]
+
+        response, _ = self._upload(rows, mock_task)
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data['successful'], 1)
+        self.assertEqual(response.data['skipped'], 1)
+        self.assertIn('same CSV', response.data['skipped_items'][0]['reason'])
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 1)
+
+    def test_reuploading_large_list_skips_every_existing_phone(self, mock_task):
+        rows = [
+            {'full_name': f'Guest {index}', 'phone_number': f'23480{index:07d}'}
+            for index in range(1000)
+        ]
+        first, _ = self._upload(rows, mock_task)
+        second, _ = self._upload(rows, mock_task)
+
+        self.assertEqual(first.data['successful'], 1000)
+        self.assertEqual(second.data['successful'], 0)
+        self.assertEqual(second.data['skipped'], 1000)
+        self.assertEqual(second.data['failed'], 0)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 1000)
+
+    @patch('rsvp.tasks.queue_workflow_invitations.delay')
+    def test_replace_list_removes_old_guests_and_syncs_new_rsvp_recipients(
+        self, mock_invitation, mock_assets,
+    ):
+        from rsvp.models import RsvpRecipient, RsvpWorkflow
+
+        old_guest = make_guest(self.event, full_name='Wrong Number')
+        workflow = RsvpWorkflow.objects.create(
+            event=self.event,
+            status=RsvpWorkflow.Status.ACTIVE,
+        )
+        RsvpRecipient.objects.create(workflow=workflow, guest=old_guest)
+        csv_file = make_csv([{
+            'full_name': 'Correct Number',
+            'phone_number': '2348000099999',
+        }])
+        csv_file.name = 'replacement.csv'
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post('/api/guests/bulk-upload/', {
+                'event': self.event.id,
+                'csv_file': csv_file,
+                'replace_existing': True,
+            }, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED, response.data)
+        self.assertEqual(response.data['replaced'], 1)
+        self.assertFalse(Guest.objects.filter(pk=old_guest.pk).exists())
+        new_guest = Guest.objects.get(event=self.event)
+        recipient = RsvpRecipient.objects.get(workflow=workflow, guest=new_guest)
+        self.assertEqual(
+            recipient.invitation_status,
+            RsvpRecipient.InvitationStatus.QUEUED,
+        )
+        mock_invitation.assert_called_once_with(workflow.id)
+
+    def test_invalid_replacement_preserves_existing_guest_list(self, mock_task):
+        old_guest = make_guest(self.event, full_name='Keep Me')
+        csv_file = make_csv([{'full_name': '', 'phone_number': '2348000000002'}])
+        csv_file.name = 'invalid-replacement.csv'
+
+        response = self.client.post('/api/guests/bulk-upload/', {
+            'event': self.event.id,
+            'csv_file': csv_file,
+            'replace_existing': True,
+        }, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data['status'], 'failed')
+        self.assertTrue(Guest.objects.filter(pk=old_guest.pk).exists())
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 1)
+
+    def test_empty_csv_returns_zero_created(self, mock_task):
+        r, _ = self._upload([], mock_task)
+        self.assertEqual(r.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(r.data['successful'], 0)
+        self.assertEqual(mock_task.call_count, 0)
+
+    def test_unauthenticated_upload_denied(self, mock_task):
+        self.client.force_authenticate(None)
+        csv_file = make_csv([{'full_name': 'X', 'phone_number': '1'}])
+        csv_file.name = 'g.csv'
+        r = self.client.post('/api/guests/bulk-upload/', {'event': self.event.id, 'csv_file': csv_file}, format='multipart')
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(mock_task.call_count, 0)
+
+    def test_missing_csv_returns_400(self, mock_task):
+        r = self.client.post('/api/guests/bulk-upload/', {'event': self.event.id}, format='multipart')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_import_status_endpoint_reports_progress(self, mock_task):
+        response, _ = self._upload([{
+            'full_name': 'Progress Guest',
+            'phone_number': '2348000000042',
+        }], mock_task)
+
+        progress = self.client.get(
+            f"/api/guests/bulk-upload-status/{response.data['upload_id']}/",
+        )
+
+        self.assertEqual(progress.status_code, status.HTTP_200_OK)
+        self.assertEqual(progress.data['status'], 'done')
+        self.assertEqual(progress.data['assets_processed'], 1)
+
+    def test_5000_guest_import_completes_with_bounded_asset_batches(self, mock_task):
+        from rsvp.models import RsvpWorkflow
+
+        workflow = RsvpWorkflow.objects.create(event=self.event)
+        rows = [
+            {'full_name': f'Guest {index}', 'phone_number': f'2348{index:010d}'}
+            for index in range(5000)
+        ]
+
+        response, _ = self._upload(rows, mock_task)
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data['successful'], 5000)
+        self.assertEqual(response.data['recipients_created'], 5000)
+        self.assertEqual(response.data['assets_processed'], 5000)
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 5000)
+        self.assertEqual(workflow.recipients.count(), 5000)
+
+
+class DownloadAssetsTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user('mgr3', password='pass', role='event_manager')
+        self.client.force_authenticate(self.manager)
+        self.event = make_event(name='Assets Event')
+        # Create guests without real files — download should handle missing files gracefully
+        self.g1 = make_guest(self.event, full_name='Alice')
+        self.g2 = make_guest(self.event, full_name='Bob')
+
+    def test_download_assets_returns_zip(self):
+        r = self.client.get('/api/guests/download-assets/', {'event': self.event.id, 'mode': 'both'})
+        self.assertEqual(r.status_code, 200)
+        content_type = r.get('Content-Type', '')
+        self.assertIn('zip', content_type)
+
+    def test_download_assets_missing_event_returns_400(self):
+        r = self.client.get('/api/guests/download-assets/')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_download_assets_nonexistent_event_returns_404(self):
+        r = self.client.get('/api/guests/download-assets/', {'event': 99999})
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_download_assets_zip_is_valid(self):
+        """Response body must be a parseable ZIP even when guests have no files."""
+        r = self.client.get('/api/guests/download-assets/', {'event': self.event.id})
+        # Collect streamed response
+        body = b''.join(r.streaming_content) if hasattr(r, 'streaming_content') else r.content
+        try:
+            with zipfile.ZipFile(io.BytesIO(body)) as zf:
+                # Valid zip — may be empty (no real files on disk in test env)
+                self.assertIsInstance(zf.namelist(), list)
+        except zipfile.BadZipFile:
+            self.fail('download-assets response is not a valid ZIP file')
+
+
+@patch('guests.views.guests.bulk_send_whatsapp_passes')
+@patch('guests.views.guests.send_whatsapp_pass')
+class PastEventWhatsAppGuardTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user('mgr4', password='pass', role='event_manager')
+        self.client.force_authenticate(self.manager)
+        self.past_event   = make_event(name='Past Event',   date=timezone.now() - timezone.timedelta(days=1))
+        self.future_event = make_event(name='Future Event', date=timezone.now() + timezone.timedelta(days=7))
+        self.past_guest   = make_guest(self.past_event,   full_name='Past Guest')
+        self.future_guest = make_guest(self.future_event, full_name='Future Guest')
+        # Give both guests a pass_image name so the no-image guard doesn't fire first
+        Guest.objects.filter(pk=self.past_guest.pk).update(pass_image='passes/fake.png')
+        Guest.objects.filter(pk=self.future_guest.pk).update(pass_image='passes/fake.png')
+        self.past_guest.refresh_from_db()
+        self.future_guest.refresh_from_db()
+
+    def test_send_whatsapp_blocked_for_past_event(self, mock_task, mock_bulk_task):
+        r = self.client.post(f'/api/guests/{self.past_guest.id}/send_whatsapp/')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('ended', r.data['detail'].lower())
+        mock_task.delay.assert_not_called()
+
+    def test_send_whatsapp_allowed_for_future_event(self, mock_task, mock_bulk_task):
+        r = self.client.post(f'/api/guests/{self.future_guest.id}/send_whatsapp/')
+        self.assertEqual(r.status_code, 200)
+        mock_task.delay.assert_called_once_with(str(self.future_guest.id))
+
+    def test_bulk_send_whatsapp_blocked_for_past_event(self, mock_task, mock_bulk_task):
+        r = self.client.post('/api/guests/bulk_send_whatsapp/', {'event_id': self.past_event.id}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('ended', r.data['detail'].lower())
+        mock_bulk_task.delay.assert_not_called()
+
+    def test_bulk_send_whatsapp_allowed_for_future_event(self, mock_task, mock_bulk_task):
+        mock_bulk_task.delay.return_value.id = 'test-task-id'
+        r = self.client.post('/api/guests/bulk_send_whatsapp/', {'event_id': self.future_event.id}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data['queued'])
+        mock_bulk_task.delay.assert_called_once_with(self.future_event.id, False)
+
+
+@patch('guests.views.guests.generate_guest_assets')
+class ScheduledSendCreateTests(TestCase):
+    """perform_create should hold back the WhatsApp send when scheduled_send_at is in the future."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.manager = User.objects.create_user('mgr5', password='pass', role='event_manager')
+        self.client.force_authenticate(self.manager)
+        self.event = make_event(name='Scheduled Event', date=timezone.now() + timezone.timedelta(days=7))
+
+    def _create(self, **extra):
+        payload = dict(
+            full_name='Scheduled Guest',
+            phone_number='2348000000009',
+            event=self.event.id,
+        )
+        payload.update(extra)
+        return self.client.post('/api/guests/', payload, format='json')
+
+    def test_no_scheduled_send_at_sends_immediately(self, mock_task):
+        r = self._create()
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        guest_id, kwargs = mock_task.delay.call_args
+        self.assertTrue(kwargs.get('send_whatsapp', True))
+
+    def test_future_scheduled_send_at_defers_send(self, mock_task):
+        future = (timezone.now() + timezone.timedelta(hours=2)).isoformat()
+        r = self._create(scheduled_send_at=future)
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        _, kwargs = mock_task.delay.call_args
+        self.assertFalse(kwargs.get('send_whatsapp'))
+        guest = Guest.objects.get(pk=r.data['id'])
+        self.assertIsNotNone(guest.scheduled_send_at)
+
+    def test_single_guest_create_adds_and_queues_named_plus_one(self, mock_task):
+        from rsvp.models import RsvpWorkflow
+
+        self.event.allow_plus_one = True
+        self.event.save(update_fields=['allow_plus_one'])
+        workflow = RsvpWorkflow.objects.create(
+            event=self.event,
+            status=RsvpWorkflow.Status.ACTIVE,
+        )
+
+        response = self._create(
+            plus_one_attending=True,
+            plus_one_full_name='Admin Companion',
+            plus_one_phone_number='+234 800 000 0010',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        primary = Guest.objects.get(pk=response.data['id'])
+        self.assertEqual(primary.named_plus_one.full_name, 'Admin Companion')
+        self.assertEqual(primary.named_plus_one.phone_number, '2348000000010')
+        self.assertEqual(workflow.recipients.count(), 1)
+        self.assertEqual(workflow.recipients.get().guest_id, primary.id)
+        self.assertEqual(mock_task.delay.call_count, 2)
+
+    def test_event_default_send_time_is_inherited(self, mock_task):
+        self.event.pass_send_at = timezone.now() + timezone.timedelta(hours=3)
+        self.event.save(update_fields=['pass_send_at'])
+        r = self._create()
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        guest = Guest.objects.get(pk=r.data['id'])
+        self.assertEqual(guest.scheduled_send_at, self.event.pass_send_at)
+        _, kwargs = mock_task.delay.call_args
+        self.assertFalse(kwargs.get('send_whatsapp'))
+
+    def test_past_scheduled_send_at_sends_immediately(self, mock_task):
+        """A scheduled time already in the past behaves like 'send now'."""
+        past = (timezone.now() - timezone.timedelta(hours=1)).isoformat()
+        r = self._create(scheduled_send_at=past)
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_scheduled_send_at_after_event_date_rejected(self, mock_task):
+        after_event = (self.event.date + timezone.timedelta(days=1)).isoformat()
+        r = self._create(scheduled_send_at=after_event)
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('scheduled_send_at', r.data)
+        mock_task.delay.assert_not_called()
+
+
+class DispatchScheduledSendsTaskTests(TestCase):
+    """guests.tasks.dispatch_scheduled_sends — the Celery Beat poll for deferred passes."""
+
+    def setUp(self):
+        self.event = make_event(name='Beat Event', date=timezone.now() + timezone.timedelta(days=7))
+
+    def _due_guest(self, **kwargs):
+        defaults = dict(
+            phone_number='2348000000001',
+            pass_image='passes/fake.png',
+            scheduled_send_at=timezone.now() - timezone.timedelta(minutes=1),
+        )
+        defaults.update(kwargs)
+        return make_guest(self.event, **defaults)
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_due_guest_is_queued(self, mock_send):
+        from .tasks import dispatch_scheduled_sends
+        guest = self._due_guest()
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 1)
+        mock_send.delay.assert_called_once_with(str(guest.id))
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_future_scheduled_guest_not_queued(self, mock_send):
+        from .tasks import dispatch_scheduled_sends
+        self._due_guest(scheduled_send_at=timezone.now() + timezone.timedelta(hours=1))
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 0)
+        mock_send.delay.assert_not_called()
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_rsvp_enabled_event_never_queues_direct_scheduled_pass(self, mock_send):
+        from .tasks import dispatch_scheduled_sends
+        self.event.rsvp_enabled = True
+        self.event.save(update_fields=['rsvp_enabled'])
+        self._due_guest()
+
+        result = dispatch_scheduled_sends()
+
+        self.assertEqual(result['queued'], 0)
+        mock_send.delay.assert_not_called()
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_already_sent_guest_not_requeued(self, mock_send):
+        from .tasks import dispatch_scheduled_sends
+        self._due_guest(whatsapp_sent=True)
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 0)
+        mock_send.delay.assert_not_called()
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_guest_without_pass_image_not_queued(self, mock_send):
+        from .tasks import dispatch_scheduled_sends
+        self._due_guest(pass_image='')
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 0)
+        mock_send.delay.assert_not_called()
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_guest_without_phone_not_queued(self, mock_send):
+        from .tasks import dispatch_scheduled_sends
+        self._due_guest(phone_number='')
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 0)
+        mock_send.delay.assert_not_called()
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_past_event_not_queued(self, mock_send):
+        from .tasks import dispatch_scheduled_sends
+        past_event = make_event(name='Past Beat Event', date=timezone.now() - timezone.timedelta(days=1))
+        make_guest(
+            past_event,
+            phone_number='2348000000002',
+            pass_image='passes/fake.png',
+            scheduled_send_at=timezone.now() - timezone.timedelta(minutes=1),
+        )
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 0)
+        mock_send.delay.assert_not_called()
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_guests_without_scheduled_send_at_ignored(self, mock_send):
+        from .tasks import dispatch_scheduled_sends
+        make_guest(self.event, phone_number='2348000000003', pass_image='passes/fake.png')
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 0)
+        mock_send.delay.assert_not_called()
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_multiple_due_guests_are_queued_without_worker_eta_tasks(self, mock_send):
+        from .tasks import dispatch_scheduled_sends
+        self._due_guest(full_name='G1', phone_number='2348000000004')
+        self._due_guest(full_name='G2', phone_number='2348000000005')
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 2)
+        self.assertEqual(mock_send.delay.call_count, 2)
+
+    @override_settings(WHATSAPP_DAILY_SEND_LIMIT=1)
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_daily_budget_caps_scheduled_sends(self, mock_send):
+        """Only the remaining daily budget is queued; the rest stays eligible."""
+        from .tasks import dispatch_scheduled_sends
+        self._due_guest(full_name='B1', phone_number='2348000000006')
+        self._due_guest(full_name='B2', phone_number='2348000000007')
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 1)
+        self.assertEqual(mock_send.delay.call_count, 1)
+        # The deferred guest is unclaimed, so a later run picks it up.
+        self.assertEqual(
+            Guest.objects.filter(scheduled_send_claimed_at__isnull=True).count(), 1,
+        )
+
+    @override_settings(WHATSAPP_DAILY_SEND_LIMIT=1, CELERY_TASK_ALWAYS_EAGER=True)
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_daily_budget_caps_bulk_send(self, mock_send):
+        from .tasks import bulk_send_whatsapp_passes
+        make_guest(self.event, full_name='P1', phone_number='2348000000008', pass_image='passes/a.png')
+        make_guest(self.event, full_name='P2', phone_number='2348000000009', pass_image='passes/b.png')
+        result = bulk_send_whatsapp_passes(self.event.id)
+        self.assertEqual(result['queued'], 1)
+        self.assertEqual(result['deferred'], 1)
+        self.assertEqual(mock_send.delay.call_count, 1)
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_repeated_run_does_not_requeue_claimed_guest(self, mock_send):
+        """A second Beat tick before the first send completes must not re-queue the guest (P1 dup fix)."""
+        from .tasks import dispatch_scheduled_sends
+        guest = self._due_guest()
+        first = dispatch_scheduled_sends()
+        self.assertEqual(first['queued'], 1)
+        second = dispatch_scheduled_sends()
+        self.assertEqual(second['queued'], 0)
+        self.assertEqual(mock_send.delay.call_count, 1)
+        guest.refresh_from_db()
+        self.assertIsNotNone(guest.scheduled_send_claimed_at)
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_stale_claim_is_retried(self, mock_send):
+        """If a claim is old enough that the send clearly never went out, it's eligible again."""
+        from .tasks import dispatch_scheduled_sends, SCHEDULED_SEND_CLAIM_TIMEOUT
+        guest = self._due_guest(
+            scheduled_send_claimed_at=timezone.now() - SCHEDULED_SEND_CLAIM_TIMEOUT - timezone.timedelta(minutes=1),
+        )
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 1)
+        mock_send.delay.assert_called_once()
+
+    @patch('guests.tasks.send_whatsapp_pass')
+    def test_recent_claim_not_retried(self, mock_send):
+        """A claim made moments ago (send likely still in flight) must not be re-queued."""
+        from .tasks import dispatch_scheduled_sends
+        self._due_guest(scheduled_send_claimed_at=timezone.now() - timezone.timedelta(minutes=5))
+        result = dispatch_scheduled_sends()
+        self.assertEqual(result['queued'], 0)
+        mock_send.delay.assert_not_called()
+
+
+class SendPassRetryTests(TestCase):
+    """whatsapp.send_pass must let transient WhatsAppError propagate so send_whatsapp_pass can retry (P1 fix)."""
+
+    def setUp(self):
+        self.event = make_event(date=timezone.now() + timezone.timedelta(days=7))
+        self.guest = make_guest(self.event, phone_number='2348000000001')
+        Guest.objects.filter(pk=self.guest.pk).update(pass_image='passes/fake.png')
+        self.guest.refresh_from_db()
+
+    def test_transient_whatsapp_error_propagates_from_send_pass(self):
+        from pywa.errors import WhatsAppError
+        from .whatsapp import send_pass
+
+        class FakeTransientError(WhatsAppError):
+            is_transient = True
+
+            def __init__(self):
+                pass
+
+        with patch('guests.whatsapp._get_client') as mock_client, \
+             self.settings(WHATSAPP_PHONE_ID='id', WHATSAPP_TOKEN='tok', WHATSAPP_MEDIA_BASE_URL='https://example.com'):
+            mock_client.return_value.send_template.side_effect = FakeTransientError()
+            with self.assertRaises(WhatsAppError):
+                send_pass(self.guest)
+
+    def test_unexpected_exception_is_swallowed_and_returns_false(self):
+        from .whatsapp import send_pass
+
+        with patch('guests.whatsapp._get_client') as mock_client, \
+             self.settings(WHATSAPP_PHONE_ID='id', WHATSAPP_TOKEN='tok', WHATSAPP_MEDIA_BASE_URL='https://example.com'):
+            mock_client.return_value.send_template.side_effect = RuntimeError('boom')
+            self.assertFalse(send_pass(self.guest))
+
+    def test_send_whatsapp_pass_task_retries_on_transient_error(self):
+        from pywa.errors import WhatsAppError
+        from .tasks import send_whatsapp_pass
+
+        class FakeTransientError(WhatsAppError):
+            is_transient = True
+
+            def __init__(self):
+                pass
+
+        with patch('guests.whatsapp.send_pass', side_effect=FakeTransientError()), \
+             patch.object(send_whatsapp_pass, 'retry', side_effect=Exception('retried')) as mock_retry, \
+             self.settings(WHATSAPP_PHONE_ID='id', WHATSAPP_TOKEN='tok'):
+            with self.assertRaises(Exception):
+                send_whatsapp_pass.apply(args=[str(self.guest.id)]).get()
+            mock_retry.assert_called_once()
+
+
+class ReminderRetryTests(TestCase):
+    """A failed reminder attempt must not permanently suppress future retries (P1 fix)."""
+
+    def setUp(self):
+        from .models import EventReminder
+        self.event = make_event(date=timezone.now() + timezone.timedelta(days=1))
+        self.guest = make_guest(self.event, phone_number='2348000000001')
+        self.reminder = EventReminder.objects.create(
+            event=self.event, hours_before=24, template_name='reminder_tmpl',
+        )
+
+    def test_failed_send_leaves_no_log_and_is_retried(self):
+        from .models import ReminderLog
+        from .tasks import send_reminder
+        with patch('guests.whatsapp.send_reminder', return_value=False):
+            result = send_reminder(self.reminder.id, str(self.guest.id))
+        self.assertFalse(result['sent'])
+        self.assertFalse(ReminderLog.objects.filter(reminder=self.reminder, guest=self.guest).exists())
+
+        # Next attempt is not blocked by a "already sent" log from the failure above
+        with patch('guests.whatsapp.send_reminder', return_value=True):
+            result2 = send_reminder(self.reminder.id, str(self.guest.id))
+        self.assertTrue(result2['sent'])
+        self.assertTrue(ReminderLog.objects.filter(reminder=self.reminder, guest=self.guest, success=True).exists())
+
+    def test_successful_send_blocks_duplicate(self):
+        from .models import ReminderLog
+        from .tasks import send_reminder
+        with patch('guests.whatsapp.send_reminder', return_value=True):
+            send_reminder(self.reminder.id, str(self.guest.id))
+        with patch('guests.whatsapp.send_reminder', return_value=True) as mock_send:
+            result = send_reminder(self.reminder.id, str(self.guest.id))
+        self.assertFalse(result['sent'])
+        mock_send.assert_not_called()
+        self.assertEqual(
+            ReminderLog.objects.filter(reminder=self.reminder, guest=self.guest).count(), 1,
+        )
+
+
+@override_settings(
+    WHATSAPP_PHONE_ID='phone-id',
+    WHATSAPP_TOKEN='token',
+    WHATSAPP_MEDIA_BASE_URL='https://media.example.com',
+)
+class ReminderMediaTemplateTests(TestCase):
+    def setUp(self):
+        from .models import WhatsAppTemplate
+
+        self.event = make_event()
+        self.guest = make_guest(self.event)
+        self.image_template = WhatsAppTemplate.objects.create(
+            name='reminder_with_pass',
+            has_header_image=True,
+        )
+        self.text_template = WhatsAppTemplate.objects.create(
+            name='reminder_message_only',
+            has_header_image=False,
+        )
+
+    def test_image_header_reminder_resends_event_pass(self):
+        from .whatsapp import send_reminder
+
+        self.guest.pass_image = 'passes/reminder-pass.png'
+        self.guest.save(update_fields=['pass_image'])
+
+        with patch('guests.whatsapp._get_client') as mock_client:
+            sent = send_reminder(self.guest, self.image_template.name)
+
+        self.assertTrue(sent)
+        mock_client.return_value.send_template.assert_called_once()
+        params = mock_client.return_value.send_template.call_args.kwargs['params']
+        self.assertEqual(len(params), 1)
+
+    def test_image_header_reminder_is_not_sent_without_event_pass(self):
+        from .whatsapp import send_reminder
+
+        with patch('guests.whatsapp._get_client') as mock_client:
+            sent = send_reminder(self.guest, self.image_template.name)
+
+        self.assertFalse(sent)
+        mock_client.return_value.send_template.assert_not_called()
+
+    def test_message_only_reminder_does_not_require_event_pass(self):
+        from .whatsapp import send_reminder
+
+        with patch('guests.whatsapp._get_client') as mock_client:
+            sent = send_reminder(self.guest, self.text_template.name)
+
+        self.assertTrue(sent)
+        params = mock_client.return_value.send_template.call_args.kwargs['params']
+        self.assertEqual(params, [])
+
+
+class ReminderApiBehaviorTests(TestCase):
+    def setUp(self):
+        from .models import EventReminder, WhatsAppTemplate
+
+        self.client = APIClient()
+        self.manager = User.objects.create_user(
+            'reminder-manager', password='pass', role='event_manager',
+        )
+        self.client.force_authenticate(self.manager)
+        self.event = make_event(rsvp_enabled=True)
+        self.confirmed = make_guest(
+            self.event, full_name='Confirmed', phone_number='2348000000001',
+        )
+        self.awaiting = make_guest(
+            self.event, full_name='Awaiting', phone_number='2348000000002',
+        )
+        WhatsAppTemplate.objects.create(
+            name='image_reminder',
+            has_header_image=True,
+        )
+        self.reminder = EventReminder.objects.create(
+            event=self.event,
+            hours_before=24,
+            template_name='image_reminder',
+        )
+
+    def test_reminder_api_identifies_templates_that_include_event_pass(self):
+        response = self.client.get(f'/api/reminders/{self.reminder.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['includes_event_pass'])
+
+    @patch('guests.tasks.send_reminder')
+    def test_send_now_also_targets_only_confirmed_rsvp_guests(self, mock_send_reminder):
+        from rsvp.models import RsvpRecipient, RsvpWorkflow
+
+        workflow = RsvpWorkflow.objects.create(event=self.event)
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=self.confirmed,
+            response_status=RsvpRecipient.ResponseStatus.CONFIRMED,
+        )
+        RsvpRecipient.objects.create(workflow=workflow, guest=self.awaiting)
+
+        response = self.client.post(
+            f'/api/reminders/{self.reminder.id}/send_now/',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['queued'], 1)
+        mock_send_reminder.delay.assert_called_once_with(
+            self.reminder.id,
+            str(self.confirmed.id),
+        )
+
+
+class DispatchDueRemindersTimingTests(TestCase):
+    """A Beat tick that lands after fire_at (delay/downtime) must still catch the reminder (P1 fix)."""
+
+    def setUp(self):
+        from .models import EventReminder
+        # Event date - hours_before = fire_at already 10 minutes in the past,
+        # simulating a Beat run that was delayed past the old forward-looking window.
+        self.event = make_event(date=timezone.now() - timezone.timedelta(hours=24) + timezone.timedelta(minutes=10))
+        self.guest = make_guest(self.event, phone_number='2348000000001')
+        self.reminder = EventReminder.objects.create(
+            event=self.event, hours_before=24, template_name='reminder_tmpl',
+        )
+
+    @patch('guests.tasks.send_reminder')
+    def test_overdue_reminder_still_dispatched(self, mock_send_reminder):
+        from .tasks import dispatch_due_reminders
+        result = dispatch_due_reminders()
+        self.assertEqual(result['queued'], 1)
+        mock_send_reminder.delay.assert_called_once()
+
+    @patch('guests.tasks.send_reminder')
+    def test_reminder_not_yet_due_is_skipped(self, mock_send_reminder):
+        from .tasks import dispatch_due_reminders
+        from .models import EventReminder
+        future_event = make_event(date=timezone.now() + timezone.timedelta(days=30))
+        make_guest(future_event, phone_number='2348000000002')
+        EventReminder.objects.create(event=future_event, hours_before=24, template_name='reminder_tmpl')
+
+        dispatch_due_reminders()
+        # Only the overdue one from setUp should have been queued
+        queued_reminder_ids = {
+            c.args[0]
+            for c in mock_send_reminder.delay.call_args_list
+        }
+        self.assertEqual(queued_reminder_ids, {self.reminder.id})
+
+    @patch('guests.tasks.send_reminder')
+    def test_queued_reminder_is_not_requeued_by_next_tick(self, mock_send_reminder):
+        """A reminder still draining through the rate limiter must not be
+        queued again by the next Beat run (claim-based dedup)."""
+        from .tasks import dispatch_due_reminders
+        first = dispatch_due_reminders()
+        second = dispatch_due_reminders()
+        self.assertEqual(first['queued'], 1)
+        self.assertEqual(second['queued'], 0)
+        mock_send_reminder.delay.assert_called_once()
+
+    @override_settings(WHATSAPP_DAILY_SEND_LIMIT=1)
+    @patch('guests.tasks.send_reminder')
+    def test_daily_budget_caps_reminder_dispatch(self, mock_send_reminder):
+        from .tasks import dispatch_due_reminders
+        make_guest(self.event, full_name='Second', phone_number='2348000000003')
+        result = dispatch_due_reminders()
+        self.assertEqual(result['queued'], 1)
+        mock_send_reminder.delay.assert_called_once()
+
+    @patch('guests.tasks.send_reminder')
+    def test_rsvp_workflow_queues_only_confirmed_guests(self, mock_send_reminder):
+        from rsvp.models import RsvpRecipient, RsvpWorkflow
+        from .tasks import dispatch_due_reminders
+
+        confirmed = self.guest
+        awaiting = make_guest(
+            self.event, full_name='Awaiting', phone_number='2348000000002',
+        )
+        declined = make_guest(
+            self.event, full_name='Declined', phone_number='2348000000003',
+        )
+        workflow = RsvpWorkflow.objects.create(
+            event=self.event,
+            status=RsvpWorkflow.Status.COMPLETED,
+        )
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=confirmed,
+            response_status=RsvpRecipient.ResponseStatus.CONFIRMED,
+        )
+        RsvpRecipient.objects.create(workflow=workflow, guest=awaiting)
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=declined,
+            response_status=RsvpRecipient.ResponseStatus.DECLINED,
+        )
+
+        result = dispatch_due_reminders()
+
+        self.assertEqual(result['queued'], 1)
+        mock_send_reminder.delay.assert_called_once_with(
+            self.reminder.id, str(confirmed.id),
+        )
+
+    @patch('guests.tasks.send_reminder')
+    def test_no_workflow_queues_all_guests_even_if_rsvp_flag_remains(self, mock_send_reminder):
+        from .tasks import dispatch_due_reminders
+
+        self.event.rsvp_enabled = True
+        self.event.save(update_fields=['rsvp_enabled'])
+        second = make_guest(
+            self.event, full_name='Second', phone_number='2348000000002',
+        )
+
+        result = dispatch_due_reminders()
+
+        self.assertEqual(result['queued'], 2)
+        queued_guest_ids = {
+            call.args[1]
+            for call in mock_send_reminder.delay.call_args_list
+        }
+        self.assertEqual(queued_guest_ids, {str(self.guest.id), str(second.id)})
+
+
+class ReminderRsvpEligibilityTests(TestCase):
+    def setUp(self):
+        from .models import EventReminder
+
+        self.event = make_event(
+            date=timezone.now() + timezone.timedelta(days=1),
+            rsvp_enabled=True,
+        )
+        self.guest = make_guest(self.event, phone_number='2348000000001')
+        self.reminder = EventReminder.objects.create(
+            event=self.event, hours_before=24, template_name='reminder_tmpl',
+        )
+
+    def test_worker_skips_guest_who_is_not_confirmed(self):
+        from rsvp.models import RsvpRecipient, RsvpWorkflow
+        from .models import ReminderLog
+        from .tasks import send_reminder
+
+        workflow = RsvpWorkflow.objects.create(event=self.event)
+        RsvpRecipient.objects.create(workflow=workflow, guest=self.guest)
+        ReminderLog.objects.create(
+            reminder=self.reminder,
+            guest=self.guest,
+            queued_at=timezone.now(),
+        )
+
+        with patch('guests.whatsapp.send_reminder') as mock_send:
+            result = send_reminder(self.reminder.id, str(self.guest.id))
+
+        self.assertFalse(result['sent'])
+        self.assertEqual(result['reason'], 'not eligible for reminder')
+        mock_send.assert_not_called()
+        self.assertFalse(
+            ReminderLog.objects.filter(
+                reminder=self.reminder, guest=self.guest,
+            ).exists()
+        )
+
+    def test_worker_sends_to_confirmed_guest(self):
+        from rsvp.models import RsvpRecipient, RsvpWorkflow
+        from .tasks import send_reminder
+
+        workflow = RsvpWorkflow.objects.create(event=self.event)
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=self.guest,
+            response_status=RsvpRecipient.ResponseStatus.CONFIRMED,
+        )
+
+        with patch('guests.whatsapp.send_reminder', return_value=True) as mock_send:
+            result = send_reminder(self.reminder.id, str(self.guest.id))
+
+        self.assertTrue(result['sent'])
+        mock_send.assert_called_once()
+
+
+class CheckInTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.staff = User.objects.create_user('staff', password='pass', role='check_in_staff')
+        self.client.force_authenticate(self.staff)
+        self.event = make_event()
+        self.guest = make_guest(self.event)
+
+    def test_check_in_succeeds(self):
+        r = self.client.post(f'/api/guests/{self.guest.id}/check_in/')
+        self.assertEqual(r.status_code, 200)
+        self.guest.refresh_from_db()
+        self.assertEqual(self.guest.status, Guest.Status.CHECKED_IN)
+        self.assertIsNotNone(self.guest.checked_in_at)
+
+    def test_double_check_in_returns_409(self):
+        self.client.post(f'/api/guests/{self.guest.id}/check_in/')
+        r = self.client.post(f'/api/guests/{self.guest.id}/check_in/')
+        self.assertEqual(r.status_code, status.HTTP_409_CONFLICT)
+
+    def test_guest_and_plus_one_can_check_in_separately_with_same_qr(self):
+        self.event.allow_plus_one = True
+        self.event.save(update_fields=['allow_plus_one'])
+        self.guest.plus_one_attending = True
+        self.guest.save(update_fields=['plus_one_attending'])
+
+        guest_response = self.client.post(
+            f'/api/guests/{self.guest.id}/check_in/',
+            {'target': 'guest'},
+            format='json',
+        )
+        plus_one_response = self.client.post(
+            f'/api/guests/{self.guest.id}/check_in/',
+            {'target': 'plus_one'},
+            format='json',
+        )
+
+        self.assertEqual(guest_response.status_code, 200)
+        self.assertEqual(plus_one_response.status_code, 200)
+        self.guest.refresh_from_db()
+        self.assertEqual(self.guest.status, Guest.Status.CHECKED_IN)
+        self.assertTrue(self.guest.plus_one_checked_in)
+        self.assertIsNotNone(self.guest.plus_one_checked_in_at)
+
+    def test_check_in_both_admits_the_whole_party(self):
+        self.guest.plus_one_attending = True
+        self.guest.save(update_fields=['plus_one_attending'])
+
+        response = self.client.post(
+            f'/api/guests/{self.guest.id}/check_in/',
+            {'target': 'both'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.guest.refresh_from_db()
+        self.assertEqual(self.guest.status, Guest.Status.CHECKED_IN)
+        self.assertTrue(self.guest.plus_one_checked_in)
+
+    def test_named_plus_one_must_use_their_own_qr(self):
+        from .plus_one import upsert_named_plus_one
+
+        self.event.allow_plus_one = True
+        self.event.save(update_fields=['allow_plus_one'])
+        plus_one, _, _ = upsert_named_plus_one(
+            self.guest,
+            'Named Companion',
+            '2348000000010',
+        )
+
+        shared_qr_response = self.client.post(
+            f'/api/guests/{self.guest.id}/check_in/',
+            {'target': 'plus_one'},
+            format='json',
+        )
+        own_qr_response = self.client.post(
+            f'/api/guests/{plus_one.id}/check_in/',
+            {'target': 'guest'},
+            format='json',
+        )
+
+        self.assertEqual(shared_qr_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('separate pass and QR', shared_qr_response.data['detail'])
+        self.assertEqual(own_qr_response.status_code, status.HTTP_200_OK)
+        plus_one.refresh_from_db()
+        self.assertEqual(plus_one.status, Guest.Status.CHECKED_IN)
+
+
+class GuestPreferencesTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.event = make_event(
+            preferences_enabled=True,
+            allow_plus_one=True,
+            collect_aso_ebi=True,
+            collect_celebrant=True,
+            celebrant_options=['Bride', 'Groom'],
+        )
+        self.guest = make_guest(self.event)
+        self.url = f'/api/guest-preferences/{self.guest.preference_token}/'
+
+    def test_preferences_are_available_without_authentication(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['celebrant_options'], ['Bride', 'Groom'])
+        self.assertTrue(response.data['can_respond'])
+
+    @patch('guests.tasks.generate_guest_assets.delay')
+    def test_preferences_form_saves_planning_choices_without_rsvp(self, mock_assets):
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.url, {
+                'plus_one_attending': True,
+                'plus_one_full_name': 'Preference Companion',
+                'plus_one_phone_number': '+234 800 000 0099',
+                'aso_ebi_requested': True,
+                'aso_ebi_quantity': 4,
+                'celebrant_name': 'Bride',
+            }, format='json')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.guest.refresh_from_db()
+        self.assertTrue(self.guest.plus_one_attending)
+        self.assertEqual(self.guest.aso_ebi_quantity, 4)
+        self.assertEqual(self.guest.celebrant_name, 'Bride')
+        self.assertIsNotNone(self.guest.preferences_submitted_at)
+        plus_one = self.guest.named_plus_one
+        self.assertEqual(plus_one.full_name, 'Preference Companion')
+        self.assertEqual(plus_one.celebrant_name, 'Bride')
+        mock_assets.assert_called_once_with(str(plus_one.id), send_whatsapp=True)
+
+    @patch('guests.tasks.generate_guest_assets.delay')
+    def test_preferences_plus_one_gets_pass_without_joining_rsvp(self, mock_assets):
+        from rsvp.models import RsvpWorkflow
+
+        workflow = RsvpWorkflow.objects.create(
+            event=self.event,
+            status=RsvpWorkflow.Status.ACTIVE,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.url, {
+                'plus_one_attending': True,
+                'plus_one_full_name': 'Pass Only Companion',
+                'plus_one_phone_number': '2348000000099',
+            }, format='json')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        plus_one = self.guest.named_plus_one
+        self.assertFalse(workflow.recipients.filter(guest=plus_one).exists())
+        mock_assets.assert_called_once_with(str(plus_one.id), send_whatsapp=True)
+
+    def test_unconfigured_celebrant_is_rejected_when_options_exist(self):
+        response = self.client.post(self.url, {
+            'plus_one_attending': False,
+            'aso_ebi_requested': False,
+            'celebrant_name': 'Someone else',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)

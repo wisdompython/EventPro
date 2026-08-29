@@ -1,0 +1,44 @@
+import io
+import logging
+import qrcode
+from django.core.files.base import ContentFile
+
+logger = logging.getLogger(__name__)
+
+
+def build_qr_payload(guest) -> str:
+    from django.conf import settings
+    site_url = getattr(settings, 'SITE_URL', 'http://localhost:3000').rstrip('/')
+    return f"{site_url}/scan/{guest.id}"
+
+
+def generate_qr_code(guest) -> bool:
+    """
+    Generate a QR code for the guest and save it.
+    Always black-on-white so the standalone file is universally readable
+    (email, print, download). Contrast on the pass is handled at composite time.
+    Returns True on success, False on failure (logs the error).
+    """
+    try:
+        qr = qrcode.QRCode(
+            version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_H,  # highest redundancy — survives partial damage
+            box_size=20,   # larger modules = more pixels per cell = sharper at any display size
+            border=4,
+        )
+        qr.add_data(build_qr_payload(guest))
+        qr.make(fit=True)
+
+        img = qr.make_image(fill_color="black", back_color="white").convert('RGBA')
+
+        buffer = io.BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+
+        filename = f"qr_{guest.id}.png"
+        guest.qr_code.save(filename, ContentFile(buffer.read()), save=True)
+        return True
+
+    except Exception as exc:
+        logger.error("QR generation failed for guest %s: %s", guest.id, exc, exc_info=True)
+        return False

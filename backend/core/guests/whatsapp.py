@@ -1,0 +1,266 @@
+import logging
+from django.conf import settings
+from django.utils import timezone
+from django.utils.text import slugify
+
+logger = logging.getLogger(__name__)
+
+
+def build_preferences_url(guest) -> str:
+    event_slug = slugify(guest.event.name)[:48] if guest.event else 'event'
+    guest_slug = slugify(guest.full_name)[:40] or 'guest'
+    return (
+        f"{settings.SITE_URL.rstrip('/')}/preferences/"
+        f"{event_slug or 'event'}-{guest_slug}-{guest.preference_token}"
+    )
+
+# ---------------------------------------------------------------------------
+# Lazy client — only initialised when first used so the app starts fine even
+# if the WhatsApp env vars are not configured yet.
+# ---------------------------------------------------------------------------
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        from pywa import WhatsApp
+        _client = WhatsApp(
+            phone_id=settings.WHATSAPP_PHONE_ID,
+            token=settings.WHATSAPP_TOKEN,
+            app_id=settings.WHATSAPP_APP_ID,
+            app_secret=settings.WHATSAPP_APP_SECRET,
+        )
+    return _client
+
+
+# ---------------------------------------------------------------------------
+# Public helpers
+# ---------------------------------------------------------------------------
+
+def send_pass(guest) -> bool:
+    """
+    Send the guest's branded pass via WhatsApp using the approved template.
+    Returns True on success, False on failure (logs the error).
+    """
+    if not settings.WHATSAPP_PHONE_ID or not settings.WHATSAPP_TOKEN:
+        logger.warning("WhatsApp not configured — skipping send for guest %s", guest.id)
+        return False
+
+    if not guest.phone_number:
+        logger.warning("Guest %s has no phone number — skipping WhatsApp send", guest.id)
+        return False
+
+    # Pass image must be publicly accessible for Meta to fetch it
+    if not guest.pass_image:
+        logger.warning("Guest %s has no pass image — skipping WhatsApp send", guest.id)
+        return False
+
+    # Don't send passes for events that have already ended
+    from django.utils import timezone as tz
+    event = guest.event
+    if event and event.date and event.date < tz.now():
+        logger.warning(
+            "Event '%s' has passed — skipping WhatsApp pass for guest %s",
+            event.name, guest.id,
+        )
+        return False
+
+    try:
+        from pywa.types.templates import HeaderImage, BodyText, TemplateLanguage
+
+        phone = _normalise_phone(guest.phone_number)
+        pass_url = _build_pass_url(guest)
+
+        if not pass_url or 'localhost' in pass_url or '127.0.0.1' in pass_url:
+            logger.error("Pass URL is not publicly accessible for guest %s: %s", guest.id, pass_url)
+            return False
+
+        # Resolve template: event override → global default
+        event = guest.event
+        tmpl = event.whatsapp_template if (event and event.whatsapp_template_id) else None
+
+        if tmpl:
+            template_name = tmpl.name
+            body_param_values = _resolve_template_params(guest, tmpl.body_params or [])
+            has_header_image = tmpl.has_header_image
+        else:
+            # Fall back to global default — image header + guest_name + event_name
+            template_name = settings.WHATSAPP_PASS_TEMPLATE
+            event_name = event.name if event else 'the event'
+            body_param_values = [guest.full_name, event_name]
+            has_header_image = True
+
+        params = []
+        if has_header_image:
+            params.append(HeaderImage.params(image=pass_url))
+        if body_param_values:
+            params.append(BodyText.params(*body_param_values))
+
+        logger.info("Sending WhatsApp to %s | template=%s | pass_url=%s", phone, template_name, pass_url)
+
+        wa = _get_client()
+        wa.send_template(to=phone, name=template_name, language=TemplateLanguage.ENGLISH, params=params)
+        logger.info("WhatsApp pass sent to guest %s (%s)", guest.id, phone)
+        return True
+
+    except Exception as exc:
+        # Let WhatsAppError propagate so callers (e.g. send_whatsapp_pass) can
+        # tell transient failures (worth retrying) from permanent ones.
+        from pywa.errors import WhatsAppError
+        if isinstance(exc, WhatsAppError):
+            raise
+        logger.error("WhatsApp send failed for guest %s: %s", guest.id, exc, exc_info=True)
+        return False
+
+
+def _resolve_template_params(guest, body_params: list) -> list:
+    """Resolve ordered variable keys to actual guest/event values."""
+    event = guest.event
+    event_date = ''
+    event_date_only = ''
+    event_time = ''
+    if event and event.date:
+        local_event_date = timezone.localtime(event.date)
+        event_date = local_event_date.strftime('%A, %d %B %Y at %I:%M %p')
+        event_date_only = _format_ordinal_date(event.date)
+        event_time = local_event_date.strftime('%I:%M %p').lstrip('0')
+
+    var_map = {
+        'guest_name':   guest.full_name or '',
+        'event_name':   event.name if event else '',
+        'event_date':   event_date,
+        'event_date_only': event_date_only,
+        'event_time':   event_time,
+        'venue':        event.venue if event else '',
+        'ticket_type':  guest.get_ticket_type_display() if hasattr(guest, 'get_ticket_type_display') else (guest.ticket_type or ''),
+        'table_number': guest.table_number or '',
+        'seat_number':  guest.seat_number or '',
+        'preferences_link': build_preferences_url(guest),
+    }
+    return [var_map.get(key, '') for key in body_params]
+
+
+def _format_ordinal_date(value) -> str:
+    """Format a date as `25th June 2026`, without a weekday."""
+    local_value = timezone.localtime(value)
+    day = local_value.day
+    if 10 <= day % 100 <= 20:
+        suffix = 'th'
+    else:
+        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th')
+    return f'{day}{suffix} {local_value.strftime("%B %Y")}'
+
+
+def send_reminder(guest, template_name: str) -> bool:
+    """Send a reminder WhatsApp template message to a guest."""
+    if not settings.WHATSAPP_PHONE_ID or not settings.WHATSAPP_TOKEN:
+        logger.warning("WhatsApp not configured — skipping reminder for guest %s", guest.id)
+        return False
+
+    if not guest.phone_number:
+        return False
+
+    try:
+        from pywa.types.templates import BodyText, HeaderImage, TemplateLanguage
+        from .models import WhatsAppTemplate
+
+        phone = _normalise_phone(guest.phone_number)
+
+        # Look up registered template config for param mapping
+        try:
+            tmpl = WhatsAppTemplate.objects.get(name=template_name, is_active=True)
+            body_param_values = _resolve_template_params(guest, tmpl.body_params or [])
+            has_header_image = tmpl.has_header_image
+        except WhatsAppTemplate.DoesNotExist:
+            # Fallback: default param order for unregistered templates
+            event = guest.event
+            event_date = timezone.localtime(event.date).strftime('%A, %d %B %Y at %I:%M %p') if (event and event.date) else ''
+            body_param_values = [guest.full_name, event.name if event else '', event_date]
+            has_header_image = False
+
+        params = []
+        if has_header_image:
+            # Image-header reminder templates resend the guest's generated
+            # event pass. The pass contains the QR code, so never submit an
+            # image template without a usable pass image/header parameter.
+            if not guest.pass_image:
+                logger.warning(
+                    "Guest %s has no pass image — skipping image reminder",
+                    guest.id,
+                )
+                return False
+            pass_url = _build_pass_url(guest)
+            if not pass_url or 'localhost' in pass_url or '127.0.0.1' in pass_url:
+                logger.error(
+                    "Pass URL is not publicly accessible for reminder guest %s: %s",
+                    guest.id,
+                    pass_url,
+                )
+                return False
+            params.append(HeaderImage.params(image=pass_url))
+
+        if body_param_values:
+            params.append(BodyText.params(*body_param_values))
+
+        wa = _get_client()
+        wa.send_template(
+            to=phone,
+            name=template_name,
+            language=TemplateLanguage.ENGLISH,
+            params=params,
+        )
+        logger.info("Reminder sent to guest %s via template %s", guest.id, template_name)
+        return True
+
+    except Exception as exc:
+        logger.error("Reminder send failed for guest %s: %s", guest.id, exc, exc_info=True)
+        return False
+
+
+def send_message(phone_number: str, message: str) -> bool:
+    """
+    Send a free-form text message to a phone number.
+    Only works within the 24-hour session window after the recipient
+    has messaged the business number first.
+    Returns True on success, False on failure.
+    """
+    if not settings.WHATSAPP_PHONE_ID or not settings.WHATSAPP_TOKEN:
+        logger.warning("WhatsApp not configured — skipping free-form send")
+        return False
+
+    if not phone_number or not message.strip():
+        logger.warning("send_message: missing phone or message")
+        return False
+
+    try:
+        phone = _normalise_phone(phone_number)
+        wa = _get_client()
+        wa.send_message(to=phone, text=message)
+        logger.info("WhatsApp free-form message sent to %s", phone)
+        return True
+    except Exception as exc:
+        logger.error("WhatsApp free-form send failed to %s: %s", phone_number, exc, exc_info=True)
+        return False
+
+
+def _normalise_phone(phone: str) -> str:
+    """Strip spaces/dashes and ensure international format (no leading +)."""
+    cleaned = phone.strip().replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+    if cleaned.startswith('+'):
+        cleaned = cleaned[1:]
+    # Convert local Nigerian 0XXXXXXXXXX → 234XXXXXXXXXX
+    if cleaned.startswith('0') and len(cleaned) == 11:
+        cleaned = '234' + cleaned[1:]
+    return cleaned
+
+
+def _build_pass_url(guest) -> str:
+    """Build the absolute public URL for the guest's pass image."""
+    base = settings.WHATSAPP_MEDIA_BASE_URL if hasattr(settings, 'WHATSAPP_MEDIA_BASE_URL') else ''
+    if not base:
+        # Fallback: construct from ALLOWED_HOSTS + MEDIA_URL
+        host = settings.ALLOWED_HOSTS[0] if settings.ALLOWED_HOSTS else 'localhost:8000'
+        scheme = 'https' if not settings.DEBUG else 'http'
+        base = f"{scheme}://{host}"
+    return f"{base}{settings.MEDIA_URL}{guest.pass_image.name}"

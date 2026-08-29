@@ -1,0 +1,60 @@
+'use client'
+
+import { Guest } from '@/lib/api'
+
+interface Props {
+  guest: Guest
+  showPhone?: boolean
+}
+
+export function GuestDetailsCard({ guest, showPhone = false }: Props) {
+  return (
+    <div className="space-y-4">
+      <div className="overflow-hidden rounded-[20px] border border-[var(--line)] bg-[var(--chip)]">
+        <div className="border-b border-[var(--line)] px-6 py-4">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">Guest Details</h2>
+        </div>
+        <dl className="divide-y divide-[var(--line)]">
+          {([
+            { label: 'Full Name',   value: guest.full_name },
+            guest.is_plus_one ? { label: 'Invited as', value: `Plus one of ${guest.primary_guest_name}` } : null,
+            showPhone ? { label: 'Phone', value: guest.phone_number || '—' } : null,
+            { label: 'Email',       value: guest.email || '—' },
+            { label: 'Event',       value: guest.event_name || '—' },
+            { label: 'Ticket',      value: guest.ticket_type.toUpperCase() },
+            { label: 'Table',       value: guest.table_number || '—' },
+            { label: 'Seat',        value: guest.seat_number || '—' },
+            { label: 'Aso Ebi',     value: guest.aso_ebi_requested ? 'Requested' : 'Not requested' },
+            guest.aso_ebi_requested ? { label: 'Aso Ebi amount', value: `${guest.aso_ebi_quantity} yards` } : null,
+            { label: 'Plus one', value: guest.plus_one_attending ? (guest.has_named_plus_one ? guest.named_plus_one_name : guest.plus_one_checked_in ? 'Attending · checked in' : 'Attending · pending') : 'None' },
+            guest.celebrant_name ? { label: 'Celebrant', value: guest.celebrant_name } : null,
+            { label: 'Preferences', value: guest.preferences_submitted_at ? `Submitted ${new Date(guest.preferences_submitted_at).toLocaleString()}` : 'Not submitted' },
+            { label: 'Registered',  value: new Date(guest.registered_at).toLocaleString() },
+            { label: 'Checked In',  value: guest.checked_in_at ? new Date(guest.checked_in_at).toLocaleString() : '—' },
+          ] as ({ label: string; value: string } | null)[]).filter((r): r is { label: string; value: string } => r !== null).map(({ label, value }) => (
+            <div key={label} className="flex items-start justify-between gap-4 px-6 py-3">
+              <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted)] w-28 flex-shrink-0">{label}</dt>
+              <dd className="text-sm text-[var(--ink)] text-right">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+
+      <div className={`rounded-[20px] border p-4 flex items-center gap-4 ${
+        guest.whatsapp_sent ? 'border-emerald-600/40 bg-emerald-500/10' : 'border-[var(--line)] bg-[var(--chip)]'
+      }`}>
+        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base flex-shrink-0 ${
+          guest.whatsapp_sent ? 'bg-emerald-500/15' : 'bg-[var(--bg)]'
+        }`}>💬</div>
+        <div>
+          <p className={`text-sm font-semibold ${guest.whatsapp_sent ? 'text-emerald-700' : 'text-[var(--muted)]'}`}>
+            {guest.whatsapp_sent ? 'Pass sent via WhatsApp' : 'WhatsApp pass not sent yet'}
+          </p>
+          {guest.whatsapp_sent_at && (
+            <p className="text-xs text-emerald-600 mt-0.5">Sent {new Date(guest.whatsapp_sent_at).toLocaleString()}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
