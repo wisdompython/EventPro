@@ -1,10 +1,28 @@
 import os
+import sys
 from .base import BASE_DIR
 
 # ---------------------------------------------------------------------------
-# Database — SQLite for development, swap to PostgreSQL in production via env
+# Database
+#
+# Local development still defaults to SQLite for zero-setup runs, but the test
+# suite defaults to PostgreSQL so it exercises the same engine as production.
+# Constraints, partial indexes and select_for_update all behave differently on
+# SQLite, so tenant-isolation work must not be validated against it.
+#
+# Override with DATABASE_ENGINE (sqlite|postgresql). Setting TEST_DATABASE_ENGINE
+# =sqlite gives you the old fast-but-unfaithful test run when you need it.
 # ---------------------------------------------------------------------------
-DATABASE_ENGINE = os.environ.get('DATABASE_ENGINE', 'sqlite')
+_testing = 'test' in sys.argv or bool(os.environ.get('PYTEST_CURRENT_TEST'))
+
+if _testing:
+    # Deliberately ignore DATABASE_ENGINE here. Most local .env files set it to
+    # sqlite for day-to-day dev, and inheriting that would silently drop the
+    # suite back onto an engine production never uses. Opt out explicitly with
+    # TEST_DATABASE_ENGINE=sqlite.
+    DATABASE_ENGINE = os.environ.get('TEST_DATABASE_ENGINE', 'postgresql')
+else:
+    DATABASE_ENGINE = os.environ.get('DATABASE_ENGINE', 'sqlite')
 
 if DATABASE_ENGINE == 'postgresql':
     DATABASES = {

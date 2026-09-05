@@ -1,4 +1,18 @@
 export type UserRole = 'super_admin' | 'event_manager' | 'check_in_staff' | 'scanner' | 'viewer';
+export type MembershipRole = 'owner' | 'admin' | 'manager' | 'check_in' | 'scanner' | 'viewer';
+
+export interface Organization {
+  id: number;
+  name: string;
+  slug: string;
+  timezone: string;
+  is_active: boolean;
+  role: MembershipRole;
+  role_display: string;
+  member_count?: number;
+  created_at?: string;
+  updated_at?: string;
+}
 
 export interface AuthUser {
   id: number;
@@ -8,6 +22,11 @@ export interface AuthUser {
   last_name: string;
   role: UserRole;
   role_display: string;
+  membership_role: MembershipRole | null;
+  membership_role_display: string | null;
+  active_organization: Organization | null;
+  organizations: Organization[];
+  is_platform_admin: boolean;
   is_active: boolean;
   date_joined: string;
   last_login: string | null;
@@ -20,6 +39,17 @@ export interface CreateUserPayload {
   last_name: string;
   role: UserRole;
   password: string;
+}
+
+export interface SignupPayload {
+  first_name: string;
+  last_name: string;
+  organization_name: string;
+  email: string;
+  password: string;
+  confirm_password: string;
+  timezone: string;
+  accept_terms: boolean;
 }
 
 export interface QueueMonitorSnapshot {
@@ -194,6 +224,14 @@ export interface Event {
   required_fields: string[];
   collect_aso_ebi: boolean;
   allow_plus_one: boolean;
+  /** Organiser-chosen wording. Blank means "use the default". */
+  plus_one_label: string;
+  aso_ebi_label: string;
+  aso_ebi_unit: string;
+  /** Resolved wording (label if set, otherwise the default). Read-only. */
+  plus_one_term: string;
+  aso_ebi_term: string;
+  aso_ebi_unit_term: string;
   preferences_enabled: boolean;
   collect_celebrant: boolean;
   celebrant_options: string[];
@@ -204,6 +242,8 @@ export interface Event {
   pass_send_at: string | null;
   rsvp_workflow_id: number | null;
   is_ended: boolean;
+  seating_plan_width: number;
+  seating_plan_height: number;
   guest_count: number;
   checked_in_count: number;
   confirmed_count: number;
@@ -361,6 +401,8 @@ export interface PaginatedRsvpRecipients {
 }
 
 export interface PublicRsvpDetails {
+  /** Questions the planner configured for this event. */
+  requirements: GuestRequirementField[];
   guest_name: string;
   event_name: string;
   event_date: string;
@@ -374,6 +416,10 @@ export interface PublicRsvpDetails {
   rsvp_background_image: string | null;
   collect_aso_ebi: boolean;
   allow_plus_one: boolean;
+  /** Resolved organiser wording, already defaulted server-side. */
+  plus_one_term: string;
+  aso_ebi_term: string;
+  aso_ebi_unit_term: string;
   collect_celebrant: boolean;
   celebrant_options: string[];
   aso_ebi_requested: boolean;
@@ -391,12 +437,18 @@ export interface PublicRsvpDetails {
 }
 
 export interface GuestPreferencesDetails {
+  /** Questions the planner configured for this event. */
+  requirements: GuestRequirementField[];
   guest_name: string;
   event_name: string;
   event_date: string;
   venue: string;
   allow_plus_one: boolean;
   collect_aso_ebi: boolean;
+  /** Resolved organiser wording, already defaulted server-side. */
+  plus_one_term: string;
+  aso_ebi_term: string;
+  aso_ebi_unit_term: string;
   collect_celebrant: boolean;
   celebrant_options: string[];
   plus_one_attending: boolean;
@@ -407,4 +459,262 @@ export interface GuestPreferencesDetails {
   celebrant_name: string;
   submitted_at: string | null;
   can_respond: boolean;
+}
+
+
+/** A question an event asks its guests (Aso Ebi, meal choice, shuttle seat...). */
+export type RequirementKind = 'boolean' | 'quantity' | 'choice' | 'multi_choice' | 'text';
+export type RequirementAppliesTo = 'primary' | 'everyone';
+export type RequirementCollectOn = 'rsvp' | 'preferences' | 'both';
+
+export interface GuestRequirement {
+  id: number;
+  event: number;
+  key: string;
+  label: string;
+  help_text: string;
+  kind: RequirementKind;
+  /** choice / multi_choice only */
+  options: string[];
+  /** quantity only */
+  unit: string;
+  required: boolean;
+  applies_to: RequirementAppliesTo;
+  collect_on: RequirementCollectOn;
+  position: number;
+  is_active: boolean;
+  created_at: string;
+  /** How many guests have answered. Read-only. */
+  response_count: number;
+}
+
+/** A starting point offered by the builder; copied into the event when chosen. */
+export interface GuestRequirementPreset {
+  key: string;
+  label: string;
+  help_text: string;
+  kind: RequirementKind;
+  options: string[];
+  unit: string;
+  applies_to: RequirementAppliesTo;
+}
+
+
+/** A question as sent to a guest-facing page, with their current answer. */
+export interface GuestRequirementField {
+  id: number;
+  key: string;
+  label: string;
+  help_text: string;
+  kind: RequirementKind;
+  options: string[];
+  /** Resolved unit for quantity questions; empty for other kinds. */
+  unit: string;
+  required: boolean;
+  /** What the guest previously answered, or null. */
+  value: boolean | number | string | string[] | null;
+}
+
+/** requirement key -> the guest's answer, in the shape the server expects. */
+export type RequirementAnswerMap = Record<string, unknown>;
+
+
+/** One table block inside a seating section. */
+export interface SeatingTable {
+  id: number;
+  section: number;
+  event: number;
+  label: string;
+  shape: 'round' | 'rectangle';
+  seats: number;
+  /** Offset from the owning section's origin, in plan units. */
+  x: number;
+  y: number;
+  position: number;
+  created_at: string;
+  /** Guests whose table_number matches this block's label. */
+  assigned: number;
+}
+
+/** Fixtures on the floor plan that nobody is seated at. */
+export type SeatingFeature =
+  | 'stage' | 'dancefloor' | 'walkway' | 'path' | 'entrance' | 'exit'
+  | 'guestexit' | 'serviceexit'
+  | 'bar' | 'buffet' | 'cake' | 'gifts' | 'photo' | 'restroom'
+  | 'area' | 'restricted' | 'other';
+
+export interface SeatingPathPoint {
+  /** Coordinates normalised to the route object's width and height. */
+  x: number;
+  y: number;
+}
+
+/** A block on the plan: either a group of tables or a venue feature. */
+export interface SeatingSection {
+  id: number;
+  event: number;
+  name: string;
+  /** "tables" holds seats; "feature" is the band, a walkway, an exit. */
+  kind: 'tables' | 'feature';
+  /** Which fixture this is, when kind is "feature". */
+  feature: SeatingFeature | '';
+  /** Short code used to build table labels, e.g. GF gives GF-01. */
+  prefix: string;
+  x: number;
+  y: number;
+  /** Explicit size in plan units; null means "fit the tables". */
+  width: number | null;
+  height: number | null;
+  /** Bendable geometry for a route feature. */
+  path_points: SeatingPathPoint[];
+  /** Arrowheads on a route: none, at the end, or at both ends. */
+  path_arrows: 'none' | 'end' | 'both';
+  /** Optional connector anchors. An anchored end follows the block it is
+   *  attached to, so moving that block keeps the route joined. */
+  path_start_section: number | null;
+  path_end_section: number | null;
+  path_start_table: number | null;
+  path_end_table: number | null;
+  columns: number;
+  is_reserved: boolean;
+  note: string;
+  position: number;
+  created_at: string;
+  tables: SeatingTable[];
+}
+
+/** Fields accepted when creating a section along with its tables. */
+export interface CreateSeatingSectionPayload {
+  event: number;
+  name: string;
+  kind?: 'tables' | 'feature';
+  feature?: SeatingFeature;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  prefix?: string;
+  columns?: number;
+  is_reserved?: boolean;
+  table_count?: number;
+  seats_per_table?: number;
+  shape?: 'round' | 'rectangle';
+  path_points?: SeatingPathPoint[];
+  path_arrows?: 'none' | 'end' | 'both';
+}
+
+/** Who is at a table, and who is still waiting to be seated. */
+export interface SeatingTableGuests {
+  assigned: Array<{ id: string; full_name: string; seat_number: string; status: string }>;
+  unassigned: Array<{ id: string; full_name: string; status: string }>;
+  seats: number;
+}
+
+
+/** A route drawn across a seating plan: an aisle, a service run, an exit route. */
+export interface SeatingPath {
+  id: number;
+  event: number;
+  label: string;
+  style: 'aisle' | 'service' | 'procession' | 'exit_route';
+  arrows: 'none' | 'end' | 'both';
+  curved: boolean;
+  /** Stroke width in plan units. */
+  width: number;
+  /** Bend points as [x, y] pairs. Two points is a straight line. */
+  points: Array<[number, number]>;
+  position: number;
+  created_at: string;
+  /** Optional anchors — an anchored end follows the block it is attached to. */
+  start_section: number | null;
+  start_table: number | null;
+  end_section: number | null;
+  end_table: number | null;
+}
+
+
+/** One guest's answer to one configured question. */
+export interface PreferenceAnswer {
+  requirement_id: number;
+  key: string;
+  label: string;
+  kind: 'boolean' | 'quantity' | 'choice' | 'multi_choice' | 'text';
+  /** Already formatted for display — "5 yards", "Nuts, Dairy", "Yes". */
+  value: string;
+  answered: boolean;
+}
+
+/** A guest row on the preference dashboard, with every answer they gave. */
+export interface PreferenceGuest {
+  id: string;
+  full_name: string;
+  phone_number: string;
+  ticket_type: string;
+  table_number: string;
+  status: string;
+  submitted_at: string | null;
+  aso_ebi_requested: boolean;
+  aso_ebi_quantity: number;
+  plus_one_attending: boolean;
+  answers: PreferenceAnswer[];
+}
+
+/** Totals for one question, in the shape a vendor order needs. */
+export interface PreferenceQuestionTotal {
+  id: number;
+  key: string;
+  label: string;
+  kind: PreferenceAnswer['kind'];
+  unit: string;
+  answered: number;
+  /** Number of option selections; can exceed answered for multi-choice questions. */
+  selection_count: number;
+  breakdown: Array<{ label: string; count: number }>;
+  /** Quantity questions only — the summed total, e.g. yards of fabric. */
+  total: number | null;
+}
+
+export interface PreferenceSeatingGuest {
+  id: string;
+  full_name: string;
+  seat_number: string;
+  checked_in: boolean;
+  submitted: boolean;
+  answers: Array<{
+    requirement_id: number;
+    label: string;
+    kind: PreferenceAnswer['kind'];
+    value: string;
+  }>;
+}
+
+/** One operational service card, collated from guests assigned to a table. */
+export interface PreferenceSeatingTable {
+  section_id: number | null;
+  section_name: string;
+  table_id: number | null;
+  table_label: string;
+  seats: number;
+  unassigned: boolean;
+  guest_count: number;
+  checked_in_count: number;
+  responded_count: number;
+  totals: PreferenceQuestionTotal[];
+  guests: PreferenceSeatingGuest[];
+}
+
+/** Everything the preference dashboard renders, fetched as one payload. */
+export interface PreferenceDashboard {
+  summary: { total: number; submitted: number; outstanding: number };
+  legacy: {
+    aso_ebi_guests: number;
+    aso_ebi_quantity: number;
+    /** True when a configured question owns the Aso Ebi total instead. */
+    aso_ebi_superseded: boolean;
+    plus_ones: number;
+  };
+  questions: PreferenceQuestionTotal[];
+  seating: PreferenceSeatingTable[];
+  columns: Array<{ id: number; key: string; label: string; kind: PreferenceAnswer['kind']; unit: string }>;
+  guests: PreferenceGuest[];
 }

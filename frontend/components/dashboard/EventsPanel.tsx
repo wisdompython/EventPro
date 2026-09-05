@@ -15,7 +15,7 @@ export function EventsPanel({ events, loading }: Props) {
         <div className="flex items-center justify-between px-5 py-3"
           style={{ borderBottom: '1px solid var(--line)' }}>
           <p className="text-[13px] font-semibold" style={{ color: 'var(--ink)' }}>Events</p>
-          <Link href="/admin/events" className="text-[11px] transition hover:opacity-70" style={{ color: 'var(--brand)' }}>
+          <Link href="/admin/event-management" className="text-[11px] transition hover:opacity-70" style={{ color: 'var(--brand)' }}>
             View all →
           </Link>
         </div>
@@ -24,7 +24,7 @@ export function EventsPanel({ events, loading }: Props) {
         ) : events.length === 0 ? (
           <div className="py-8 text-center text-xs" style={{ color: 'var(--muted)' }}>No events yet.</div>
         ) : events.slice(0, 4).map((ev) => (
-          <Link href={`/admin/events/${ev.id}`} key={ev.id} className="flex items-center justify-between px-5 py-3 transition hover:bg-[var(--chip)]"
+          <Link href={`/admin/event-management/${ev.id}`} key={ev.id} className="flex items-center justify-between px-5 py-3 transition hover:bg-[var(--chip)]"
             style={{ borderBottom: '1px solid var(--line)' }}>
             <div>
               <p className="text-[13px] font-semibold" style={{ color: 'var(--ink)' }}>{ev.name}</p>
@@ -42,13 +42,13 @@ export function EventsPanel({ events, loading }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Link href="/admin/guests/add"
+        <Link href="/admin/guestbook/add"
           className="p-4 transition hover:opacity-80"
           style={{ border: '1px solid var(--line)', background: 'var(--panel)' }}>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--brand)' }}>New</p>
           <p className="mt-1 text-[13px] font-semibold" style={{ color: 'var(--ink)' }}>Add Guest</p>
         </Link>
-        <Link href="/admin/guests/bulk-upload"
+        <Link href="/admin/list-import"
           className="p-4 transition hover:opacity-80"
           style={{ border: '1px solid var(--line)', background: 'var(--panel)' }}>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--brand)' }}>Import</p>

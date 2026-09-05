@@ -44,7 +44,7 @@ export default function NameTypographyPanel({
             <option value="">Default (system)</option>
             {fonts.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
-          <p className="form-hint"><a href="/admin/fonts" className="font-semibold text-[var(--brand)] hover:underline">Manage uploaded fonts →</a></p>
+          <p className="form-hint"><a href="/admin/pass-studio" className="font-semibold text-[var(--brand)] hover:underline">Manage uploaded fonts →</a></p>
         </div>
         <div>
           <label className={label}>Color</label>

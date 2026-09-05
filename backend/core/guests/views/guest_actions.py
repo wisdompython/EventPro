@@ -1,5 +1,4 @@
 import csv
-import csv
 import io
 import logging
 import os
@@ -16,6 +15,7 @@ from ..csv_utils import safe_csv_row
 from ..models import Event, Guest, BulkUpload
 from ..serializers import BulkGuestUploadSerializer, BulkUploadSerializer
 from ..tasks import process_bulk_guest_upload
+from accounts.tenancy import get_request_organization
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class GuestBulkExportMixin:
     @action(detail=False, methods=['post'],
             parser_classes=[MultiPartParser, FormParser], url_path='bulk-upload')
     def bulk_upload(self, request):
-        serializer = BulkGuestUploadSerializer(data=request.data)
+        serializer = BulkGuestUploadSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         upload = BulkUpload.objects.create(
             event=serializer.validated_data['event'],
@@ -62,8 +62,9 @@ class GuestBulkExportMixin:
         url_path=r'bulk-upload-status/(?P<upload_id>\d+)',
     )
     def bulk_upload_status(self, request, upload_id=None):
-        uploads = BulkUpload.objects.all()
-        if not request.user.is_super_admin:
+        organization = get_request_organization(request, required=True)
+        uploads = BulkUpload.objects.filter(event__organization=organization)
+        if not request.user.is_superuser:
             uploads = uploads.filter(uploaded_by=request.user)
         try:
             upload = uploads.get(pk=upload_id)
@@ -102,7 +103,10 @@ class GuestBulkExportMixin:
             qs = qs.filter(status=status_param)
 
         try:
-            event = Event.objects.get(pk=event_id) if event_id else None
+            event = Event.objects.get(
+                pk=event_id,
+                organization=get_request_organization(request, required=True),
+            ) if event_id else None
         except Event.DoesNotExist:
             event = None
         event_slug = event.name.replace(' ', '_') if event else 'all_events'
@@ -157,11 +161,14 @@ class GuestBulkExportMixin:
             return Response({'detail': 'event param required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            event = Event.objects.get(pk=event_id)
+            event = Event.objects.get(
+                pk=event_id,
+                organization=get_request_organization(request, required=True),
+            )
         except Event.DoesNotExist:
             return Response({'detail': 'Event not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        guests = Guest.objects.filter(event=event).order_by('full_name')
+        guests = self.get_queryset().filter(event=event).order_by('full_name')
 
         def safe_name(name):
             return re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')

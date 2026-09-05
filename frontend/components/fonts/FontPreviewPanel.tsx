@@ -51,7 +51,7 @@ export function FontPreviewPanel({ activeEvent }: Props) {
               Upload a pass template image for this event via the event settings, then configure the QR and name zones.
             </p>
             {ev && (
-              <a href={`/admin/events/${ev.id}/edit`}
+              <a href={`/admin/event-management/${ev.id}/edit`}
                 className="mt-2 px-4 py-2 text-xs font-semibold text-white"
                 style={{ background: 'var(--brand)' }}>
                 Edit event settings

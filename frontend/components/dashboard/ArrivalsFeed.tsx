@@ -17,7 +17,7 @@ export function ArrivalsFeed({ guests, loading }: Props) {
           <span className="h-1.5 w-1.5 rounded-full live-dot" style={{ background: 'var(--brand)' }} />
           <p className="text-[13px] font-semibold" style={{ color: 'var(--ink)' }}>Arrivals feed</p>
         </div>
-        <Link href="/admin/guests" className="text-[11px] transition hover:opacity-70" style={{ color: 'var(--brand)' }}>
+        <Link href="/admin/guestbook" className="text-[11px] transition hover:opacity-70" style={{ color: 'var(--brand)' }}>
           View all →
         </Link>
       </div>

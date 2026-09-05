@@ -30,7 +30,7 @@ export default function AdminError({ error, reset }: { error: Error & { digest?:
           style={{ background: 'var(--brand)' }}>
           Try Again
         </button>
-        <a href="/admin/dashboard"
+        <a href="/admin/today"
           className="rounded-full px-5 py-2 text-sm font-semibold transition hover:opacity-70"
           style={{ border: '1px solid var(--line)', color: 'var(--muted)' }}>
           Go to Dashboard

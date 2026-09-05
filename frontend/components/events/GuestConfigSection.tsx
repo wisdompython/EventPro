@@ -12,18 +12,27 @@ interface Props {
   whatsappEnabled: boolean
   collectAsoEbi: boolean
   allowPlusOne: boolean
+  plusOneLabel?: string
+  asoEbiLabel?: string
+  asoEbiUnit?: string
   preferencesEnabled: boolean
   collectCelebrant: boolean
   celebrantOptions: string[]
   whatsappTemplate: number | null
   templates: WhatsAppTemplate[]
   step?: number
+  lockWhatsApp?: boolean
+  showPreferencesToggle?: boolean
+  showGuestPreferenceOptions?: boolean
   onChange: (patch: {
     ticketTypes?: TicketTypeDef[]
     requiredFields?: string[]
     whatsappEnabled?: boolean
     collectAsoEbi?: boolean
     allowPlusOne?: boolean
+    plusOneLabel?: string
+    asoEbiLabel?: string
+    asoEbiUnit?: string
     preferencesEnabled?: boolean
     collectCelebrant?: boolean
     celebrantOptions?: string[]
@@ -31,7 +40,7 @@ interface Props {
   }) => void
 }
 
-export function GuestConfigSection({ ticketTypes, requiredFields, whatsappEnabled, collectAsoEbi, allowPlusOne, preferencesEnabled, collectCelebrant, celebrantOptions, whatsappTemplate, templates, step, onChange }: Props) {
+export function GuestConfigSection({ ticketTypes, requiredFields, whatsappEnabled, collectAsoEbi, allowPlusOne, plusOneLabel = '', asoEbiLabel = '', asoEbiUnit = '', preferencesEnabled, collectCelebrant, celebrantOptions, whatsappTemplate, templates, step, lockWhatsApp = false, showPreferencesToggle = true, showGuestPreferenceOptions = true, onChange }: Props) {
   const selectedTemplate = templates.find((t) => t.id === whatsappTemplate)
 
   return (
@@ -44,9 +53,15 @@ export function GuestConfigSection({ ticketTypes, requiredFields, whatsappEnable
           whatsappEnabled={whatsappEnabled}
           collectAsoEbi={collectAsoEbi}
           allowPlusOne={allowPlusOne}
+          plusOneLabel={plusOneLabel}
+          asoEbiLabel={asoEbiLabel}
+          asoEbiUnit={asoEbiUnit}
           preferencesEnabled={preferencesEnabled}
           collectCelebrant={collectCelebrant}
           celebrantOptions={celebrantOptions}
+          lockWhatsApp={lockWhatsApp}
+          showPreferencesToggle={showPreferencesToggle}
+          showGuestPreferenceOptions={showGuestPreferenceOptions}
           onChange={onChange}
         />
 

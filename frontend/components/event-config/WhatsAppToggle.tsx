@@ -3,9 +3,10 @@
 interface Props {
   whatsappEnabled: boolean
   onChange: (enabled: boolean) => void
+  locked?: boolean
 }
 
-export function WhatsAppToggle({ whatsappEnabled, onChange }: Props) {
+export function WhatsAppToggle({ whatsappEnabled, onChange, locked = false }: Props) {
   return (
     <div
       data-tour="event-whatsapp-toggle"
@@ -16,7 +17,9 @@ export function WhatsAppToggle({ whatsappEnabled, onChange }: Props) {
         <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>WhatsApp pass delivery</p>
         <p className="mt-1 text-xs leading-5" style={{ color: 'var(--muted)' }}>
           {whatsappEnabled
-            ? 'Send passes through WhatsApp. Guest phone numbers become required.'
+            ? locked
+              ? 'Required for RSVP invitations and confirmed guest passes.'
+              : 'Send passes through WhatsApp. Guest phone numbers become required.'
             : 'Keep pass delivery off. Guest phone numbers remain optional.'}
         </p>
       </div>
@@ -25,8 +28,10 @@ export function WhatsAppToggle({ whatsappEnabled, onChange }: Props) {
         role="switch"
         aria-checked={whatsappEnabled}
         aria-label="WhatsApp delivery"
+        aria-disabled={locked}
+        disabled={locked}
         onClick={() => onChange(!whatsappEnabled)}
-        className="relative mt-0.5 h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors"
+        className="relative mt-0.5 h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-70"
         style={{ background: whatsappEnabled ? 'var(--brand)' : '#d1d5db' }}
       >
         <span

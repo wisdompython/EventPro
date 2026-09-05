@@ -99,7 +99,7 @@ export function RemindersSection({ eventId }: Props) {
 
       <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--line)' }}>
         <div>
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Reminders</h2>
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Follow-ups</h2>
           <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
             WhatsApp reminders sent automatically before the event.
           </p>

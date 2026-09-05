@@ -22,10 +22,10 @@ export function HeroSection() {
           Empower your high-stakes events with instant QR check-ins, fully branded digital passes, and automated communication workflows.
         </p>
         <div className="mt-7 flex flex-wrap gap-3">
-          <Link href="/admin/dashboard" className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90" style={{ background: 'var(--brand)' }}>
+          <Link href="/admin/today" className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90" style={{ background: 'var(--brand)' }}>
             Get Started
           </Link>
-          <Link href="/admin/guests" className="flex items-center gap-2 rounded-lg border px-5 py-2.5 text-sm font-semibold transition hover:bg-white" style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}>
+          <Link href="/admin/guestbook" className="flex items-center gap-2 rounded-lg border px-5 py-2.5 text-sm font-semibold transition hover:bg-white" style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}>
             <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
             Watch Demo
           </Link>

@@ -1,8 +1,17 @@
 #!/bin/sh
 set -e
 
-# If arguments are passed (e.g. celery worker), run them directly without gunicorn setup
-if [ "$1" = "celery" ]; then
+# The development compose stack supplies an explicit command. Run migrations
+# before the local server and pass worker/scheduler commands through unchanged.
+if [ "$1" = "python" ] && [ "$2" = "manage.py" ] && [ "$3" = "runserver" ]; then
+  echo "Running migrations..."
+  python manage.py migrate --noinput
+  echo "Preparing the local Event Pro workspace..."
+  python manage.py seed_demo
+  exec "$@"
+fi
+
+if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 

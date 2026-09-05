@@ -4,6 +4,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from .models import RsvpRecipient, RsvpWorkflow
+from accounts.tenancy import get_request_organization
 
 
 class RsvpStatsSerializer(serializers.Serializer):
@@ -177,11 +178,24 @@ class RsvpWorkflowSerializer(serializers.ModelSerializer):
                 'event': 'The event cannot be changed after a workflow is created.',
             })
         event = attrs.get('event') or (instance.event if instance else None)
+        request = self.context.get('request')
+        if request and request.user.is_authenticated and event:
+            organization = get_request_organization(request, required=True)
+            if event.organization_id != organization.id:
+                raise serializers.ValidationError({'event': 'Event not found.'})
         invitation_template = attrs.get(
             'invitation_template',
             instance.invitation_template if instance else None,
         )
         pass_template = attrs.get('pass_template', instance.pass_template if instance else None)
+        if invitation_template and event and invitation_template.organization_id != event.organization_id:
+            raise serializers.ValidationError({
+                'invitation_template': 'Template not found.',
+            })
+        if pass_template and event and pass_template.organization_id != event.organization_id:
+            raise serializers.ValidationError({
+                'pass_template': 'Template not found.',
+            })
         auto_send_pass = attrs.get(
             'auto_send_pass',
             instance.auto_send_pass if instance else True,

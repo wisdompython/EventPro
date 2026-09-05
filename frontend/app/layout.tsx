@@ -1,31 +1,29 @@
 import type { Metadata } from 'next'
-import { Inter, Playfair_Display } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/lib/auth'
 
-const inter = Inter({
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '600', '700', '800'],
-  variable: '--loaded-sans',
-  display: 'swap',
-})
-
-const playfair = Playfair_Display({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  style: ['normal', 'italic'],
-  variable: '--loaded-display',
-  display: 'swap',
-})
-
 export const metadata: Metadata = {
-  title: 'TWS E-GuestPass',
-  description: 'Event guest operations, pass delivery, and door check-in in one place.',
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'),
+  title: {
+    default: 'Event Pro',
+    template: '%s · Event Pro',
+  },
+  description: 'Manage every guest from WhatsApp invitation and RSVP to seating, branded passes, and event-day check-in.',
+  openGraph: {
+    title: 'Event Pro — Plan with clarity. Host with confidence.',
+    description: 'One beautifully organized workspace for every guest and every event detail.',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Event Pro — Plan with clarity. Host with confidence.',
+    description: 'One beautifully organized workspace for every guest and every event detail.',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${playfair.variable}`}>
+    <html lang="en">
       <body className="antialiased"><AuthProvider>{children}</AuthProvider></body>
     </html>
   )

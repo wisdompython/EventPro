@@ -11,10 +11,10 @@ export function CtaSection() {
           Join event teams worldwide and streamline your guest management process today.
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
-          <Link href="/admin/dashboard" className="rounded-lg px-7 py-3 text-sm font-semibold transition hover:opacity-90" style={{ background: '#fff', color: 'var(--brand)' }}>
+          <Link href="/admin/today" className="rounded-lg px-7 py-3 text-sm font-semibold transition hover:opacity-90" style={{ background: '#fff', color: 'var(--brand)' }}>
             Open Dashboard
           </Link>
-          <Link href="/admin/guests/bulk-upload" className="rounded-lg border px-7 py-3 text-sm font-semibold transition hover:bg-white/10" style={{ borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }}>
+          <Link href="/admin/list-import" className="rounded-lg border px-7 py-3 text-sm font-semibold transition hover:bg-white/10" style={{ borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }}>
             Import Guest List
           </Link>
         </div>

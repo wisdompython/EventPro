@@ -7,16 +7,20 @@ interface Props {
   onChange: (yards: number) => void
   name?: string
   id?: string
+  /** Organiser wording, already resolved (e.g. "yards", "metres", "sets"). */
+  unitTerm?: string
+  /** Organiser wording for the request itself (e.g. "Aso Ebi", "Fabric"). */
+  term?: string
 }
 
-export default function AsoEbiYardSelector({ value, onChange, name, id = 'aso-ebi-yards' }: Props) {
+export default function AsoEbiYardSelector({ value, onChange, name, id = 'aso-ebi-yards', unitTerm = 'yards', term = 'Aso Ebi' }: Props) {
   const isCustom = !YARD_PRESETS.includes(value as (typeof YARD_PRESETS)[number])
 
   return (
     <fieldset>
-      <legend className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">How many yards?</legend>
+      <legend className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">How many {unitTerm}?</legend>
       {name && <input type="hidden" name={name} value={value} />}
-      <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-7" role="radiogroup" aria-label="Aso Ebi yards">
+      <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-7" role="radiogroup" aria-label={`${term} ${unitTerm}`}>
         {YARD_PRESETS.map((yards) => {
           const selected = value === yards
           return (
@@ -35,12 +39,12 @@ export default function AsoEbiYardSelector({ value, onChange, name, id = 'aso-eb
       </div>
       {isCustom && (
         <div className="mt-3">
-          <label htmlFor={id} className="text-xs font-medium text-[var(--muted)]">Custom number of yards</label>
+          <label htmlFor={id} className="text-xs font-medium text-[var(--muted)]">Custom number of {unitTerm}</label>
           <div className="relative mt-1.5 w-full sm:max-w-xs">
             <input id={id} type="number" min="1" step="1" required value={value}
               onChange={(event) => onChange(Math.max(1, Number(event.target.value) || 1))}
               className="form-control pr-16" />
-            <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[var(--muted)]">yards</span>
+            <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[var(--muted)]">{unitTerm}</span>
           </div>
         </div>
       )}

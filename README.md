@@ -1,6 +1,6 @@
-# TWS E-GuestPass
+# Event Pro
 
-A private-event guest operations platform built for WhatsApp-first markets. Covers the full workflow from guest import → branded pass generation → WhatsApp delivery → QR check-in.
+A SaaS-ready event planning and guest operations platform built for WhatsApp-first markets. Event Pro covers the workflow from guest planning and RSVP through branded passes, delivery, seating, and door check-in.
 
 Built for event agencies, wedding planners, churches, and corporate brand events where WhatsApp is the primary communication channel.
 
@@ -95,7 +95,7 @@ Built for event agencies, wedding planners, churches, and corporate brand events
 ## Project Structure
 
 ```
-guest_management/
+event-pro/
 ├── backend/
 │   └── core/
 │       ├── accounts/        # Custom user model, roles, JWT-free session auth
@@ -123,19 +123,50 @@ guest_management/
 │   │   └── users/           # UserTable, UserRow, UserFormModal
 │   └── lib/
 │       └── api/             # Typed API client split by domain (auth, guests, events, …)
-├── docker-compose.yml       # Local dev (Redis only)
+├── docker-compose.yml       # Full local development stack
 └── docker-compose.prod.yml  # Production (backend, frontend, celery, redis, postgres)
 ```
 
 ---
 
-## Getting Started
+## Getting Started with Docker
+
+The complete Event Pro development environment runs with one command:
+
+```bash
+docker compose up -d --build
+```
+
+Open [http://localhost:3000](http://localhost:3000) and sign in with:
+
+```text
+Username: eventpro-demo
+Password: eventpro123
+```
+
+The first start creates an isolated **Event Pro Demo** organization and a sample
+event. Source folders are mounted into the containers, so frontend and backend
+changes reload while the stack is running.
+
+Useful commands:
+
+```bash
+docker compose ps
+docker compose logs -f backend frontend worker beat
+docker compose down
+```
+
+PostgreSQL data and uploaded media live in named Docker volumes and survive
+`docker compose down`. Use `docker compose down -v` only when you intentionally
+want to erase the local data.
+
+### Manual Setup
 
 ### Prerequisites
 
 - Python 3.11+
 - Node.js 20+
-- Docker (for Redis in dev, or full stack in prod)
+- Docker Desktop (recommended), or Python 3.12+, Node.js 20+, PostgreSQL, and Redis
 
 ### Backend Setup
 
@@ -170,11 +201,14 @@ cp .env.local.example .env.local
 npm run dev
 ```
 
-### Start Redis (required for background tasks)
+### Start only Postgres and Redis
 
 ```bash
-docker compose up -d
+docker compose up -d postgres redis
 ```
+
+This starts PostgreSQL on 5432 and Redis on 6379, both with health checks.
+The credentials match the PostgreSQL defaults in `backend/.env.example`.
 
 ### Start Celery Worker
 
@@ -182,6 +216,26 @@ docker compose up -d
 cd backend/core
 celery -A core worker --loglevel=info
 ```
+
+---
+
+## Running Tests
+
+```bash
+docker compose up -d postgres   # tests need PostgreSQL
+cd backend/core
+python manage.py test
+```
+
+Two things differ from the `runserver` configuration on purpose:
+
+- **Tests always run on PostgreSQL**, even when `DATABASE_ENGINE=sqlite` in your
+  `.env`. Production runs PostgreSQL, and constraints, partial indexes and
+  `select_for_update` all behave differently on SQLite. Override with
+  `TEST_DATABASE_ENGINE=sqlite` if you need the faster, less faithful run.
+- **Celery always runs eagerly** under `manage.py test`, so the suite never
+  needs a live broker. Previously, having `CELERY_BROKER_URL` set in `.env`
+  (the normal local setup) made the suite hang indefinitely instead of running.
 
 ---
 
@@ -337,8 +391,8 @@ curl -fsSL https://get.docker.com | sh
 sudo apt install nginx certbot python3-certbot-nginx -y
 
 # 3. Clone the repo
-git clone <repo-url> ~/guest-management-system
-cd ~/guest-management-system
+git clone <repo-url> ~/event-pro
+cd ~/event-pro
 
 # 4. Configure environment
 cp .env.prod.example .env.prod

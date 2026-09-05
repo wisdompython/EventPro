@@ -2,11 +2,16 @@ from django.db import transaction
 from rest_framework import serializers
 from ..models import Guest
 from .event import CONFIGURABLE_FIELDS, _event_required_fields, _event_valid_ticket_values
+from accounts.models import MembershipRole
+from accounts.tenancy import get_request_organization, has_membership_role
 
 
 def _can_see_phone(request) -> bool:
-    """Only super admins may see guest phone numbers."""
-    return bool(request and request.user and request.user.is_authenticated and request.user.is_super_admin)
+    """Only organization owners/admins and platform superusers may see phone numbers."""
+    return bool(
+        request and request.user and request.user.is_authenticated and
+        (request.user.is_superuser or has_membership_role(request, MembershipRole.ADMIN))
+    )
 
 
 class GuestSerializer(serializers.ModelSerializer):
@@ -86,6 +91,12 @@ class GuestSerializer(serializers.ModelSerializer):
         event = data.get('event') or (self.instance.event if self.instance else None)
         if not event:
             return data
+
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            organization = get_request_organization(request, required=True)
+            if event.organization_id != organization.id:
+                raise serializers.ValidationError({'event': 'Event not found.'})
 
         required = _event_required_fields(event)
 

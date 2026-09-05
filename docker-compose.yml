@@ -1,6 +1,141 @@
+name: eventpro
+
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-guest_management}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-guest_management}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
+
+  backend:
+    image: event-pro-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: python manage.py runserver 0.0.0.0:8000
+    environment: &backend-environment
+      SECRET_KEY: ${SECRET_KEY:-event-pro-local-development-key}
+      DEBUG: "True"
+      ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      DATABASE_ENGINE: postgresql
+      DB_NAME: ${DB_NAME:-guest_management}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      CSRF_TRUSTED_ORIGINS: http://localhost:3000
+      SITE_URL: http://localhost:3000
+      APP_TIME_ZONE: ${APP_TIME_ZONE:-Africa/Lagos}
+      EVENT_PRO_DEMO_USERNAME: ${EVENT_PRO_DEMO_USERNAME:-eventpro-demo}
+      EVENT_PRO_DEMO_PASSWORD: ${EVENT_PRO_DEMO_PASSWORD:-eventpro123}
+      EVENT_PRO_DEMO_EMAIL: ${EVENT_PRO_DEMO_EMAIL:-admin@eventpro.local}
+    volumes:
+      - ./backend/core:/app
+      - media_files:/app/media
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/auth/csrf/', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    image: event-pro-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A core worker --loglevel=info --concurrency=2 -Q celery,imports,assets,messages
+    environment: *backend-environment
+    volumes:
+      - ./backend/core:/app
+      - media_files:/app/media
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  beat:
+    image: event-pro-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A core beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    environment: *backend-environment
+    volumes:
+      - ./backend/core:/app
+      - media_files:/app/media
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: deps
+    # Webpack rather than Turbopack: only Webpack can poll for changes, and
+    # inotify does not work over the WSL2 bind mount this source is served on.
+    command: npm run dev:docker
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+      - frontend_next:/app/.next
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  media_files:
+  frontend_node_modules:
+  frontend_next:

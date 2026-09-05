@@ -101,6 +101,7 @@ export const rsvpApi = {
     plusOneFullName = '',
     plusOnePhoneNumber = '',
     celebrantName = '',
+    requirements: Record<string, unknown> = {},
   ) =>
     request<{
       accepted: boolean
@@ -117,6 +118,9 @@ export const rsvpApi = {
         plus_one_full_name: answer === 'yes' && plusOneAttending ? plusOneFullName : '',
         plus_one_phone_number: answer === 'yes' && plusOneAttending ? plusOnePhoneNumber : '',
         celebrant_name: answer === 'yes' ? celebrantName : '',
+        // A decline is not the moment to enforce meal choices, so answers are
+        // only sent with a yes.
+        requirements: answer === 'yes' ? requirements : {},
       }),
     }),
 }

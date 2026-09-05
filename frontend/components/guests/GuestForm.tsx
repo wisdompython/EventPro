@@ -1,14 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Event } from '@/lib/api'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
+import { DateTimePicker } from '@/components/ui/DateTimePicker'
 import AsoEbiYardSelector from '@/components/rsvp/AsoEbiYardSelector'
 
-const field = 'w-full rounded-[12px] border border-[var(--line)] bg-[var(--chip)] px-4 py-2.5 text-sm text-[var(--ink)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)] placeholder:text-[var(--muted-2)]'
-const select = 'w-full rounded-[12px] border border-[var(--line)] bg-[var(--field)] px-4 py-2.5 text-sm text-[var(--ink)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]'
-const labelCls = 'block text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)] mb-1.5'
+const field = 'form-control'
+const select = 'form-control'
+const labelCls = 'form-label'
 
 const OPTIONAL_FIELDS = [
   { key: 'phone_number', label: 'Phone Number', type: 'tel',   placeholder: '+234 800 000 0000' },
@@ -35,21 +36,44 @@ export function GuestForm({
   const [asoEbiRequested, setAsoEbiRequested] = useState(false)
   const [asoEbiYards, setAsoEbiYards] = useState(2)
   const [plusOneAttending, setPlusOneAttending] = useState(false)
+  const [flowStep, setFlowStep] = useState(1)
+  const [flowError, setFlowError] = useState('')
+  const [scheduledSendAt, setScheduledSendAt] = useState('')
+  const formRef = useRef<HTMLFormElement>(null)
 
   useEffect(() => {
     setAsoEbiRequested(false)
     setAsoEbiYards(2)
     setPlusOneAttending(false)
+    setFlowStep(1)
+    setScheduledSendAt('')
   }, [selectedEvent?.id])
 
-  return (
-    <form onSubmit={onSubmit} className="overflow-hidden rounded-[24px] border border-[var(--line)] bg-[var(--chip)]">
-      <div className="border-b border-[var(--line)] px-6 py-4">
-        <h2 data-tour="guest-form-header" className="text-sm font-semibold text-[var(--ink)]">Guest information</h2>
-        <p className="mt-0.5 text-xs text-[var(--muted)]">Fields marked * are required.</p>
-      </div>
+  function continueFlow() {
+    setFlowError('')
+    if (flowStep === 1 && !selectedEvent) {
+      setFlowError('Choose an event before continuing.')
+      return
+    }
+    const stage = formRef.current?.querySelector(`[data-flow-stage="${flowStep}"]`)
+    const invalid = stage?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(':invalid')
+    if (invalid) { invalid.reportValidity(); return }
+    setFlowStep((current) => Math.min(3, current + 1))
+  }
 
-      <div className="grid gap-4 p-6 sm:grid-cols-2">
+  return (
+    <form ref={formRef} onSubmit={onSubmit} className="form-card form-flow">
+      <div className="form-flow__topline">
+        <div><p>Guest setup</p><h2 data-tour="guest-form-header">{['Identity & event', 'Guest preferences', 'Delivery review'][flowStep - 1]}</h2></div>
+        <strong>{flowStep}<span>/03</span></strong>
+      </div>
+      <div className="form-flow__progress" aria-label={`Step ${flowStep} of 3`}><i style={{ width: `${flowStep * 33.333}%` }} /></div>
+      <div className="form-flow__steps" aria-label="Guest setup steps">
+        {['Who', 'Preferences', 'Review'].map((label, index) => <button type="button" key={label} onClick={() => index + 1 < flowStep && setFlowStep(index + 1)} className={index + 1 === flowStep ? 'is-active' : index + 1 < flowStep ? 'is-complete' : ''}><span>{index + 1 < flowStep ? '✓' : index + 1}</span>{label}</button>)}
+      </div>
+      {flowError && <p className="form-flow__error" role="alert">{flowError}</p>}
+
+      <div data-flow-stage="1" className={`form-flow__stage grid gap-4 p-6 sm:grid-cols-2 ${flowStep === 1 ? 'is-active' : ''}`}>
         <div className="sm:col-span-2">
           <label className={labelCls}>Full Name *</label>
           <input data-tour="guest-name-field" name="full_name" type="text" required placeholder="e.g. Adaeze Okonkwo" className={field} />
@@ -79,7 +103,9 @@ export function GuestForm({
             ))}
           </select>
         </div>
+      </div>
 
+      <div data-flow-stage="2" className={`form-flow__stage grid gap-4 p-6 sm:grid-cols-2 ${flowStep === 2 ? 'is-active' : ''}`}>
         {OPTIONAL_FIELDS.map(({ key, label, type, placeholder }) => {
           const isRequired = uniqueRequired.includes(key)
           return (
@@ -133,39 +159,28 @@ export function GuestForm({
             {selectedEvent.celebrant_options.length ? <select name="celebrant_name" className={select}><option value="">Select a celebrant</option>{selectedEvent.celebrant_options.map((name) => <option key={name} value={name}>{name}</option>)}</select> : <input name="celebrant_name" placeholder="Enter celebrant name" className={field} />}
           </div>
         )}
+      </div>
 
+      <div data-flow-stage="3" className={`form-flow__stage grid gap-4 p-6 sm:grid-cols-2 ${flowStep === 3 ? 'is-active' : ''}`}>
         {selectedEvent?.whatsapp_enabled && (
           <div className="sm:col-span-2">
             <label className={labelCls}>
               Schedule pass send <span className="normal-case font-normal tracking-normal" style={{ color: 'var(--muted-2)' }}>(optional — leave blank to send immediately)</span>
             </label>
-            <input name="scheduled_send_at" type="datetime-local" className={field} />
+            <DateTimePicker name="scheduled_send_at" value={scheduledSendAt} onChange={setScheduledSendAt} />
           </div>
         )}
+
+        {selectedEvent && <div className="form-flow__review sm:col-span-2">
+          <div><span>Event</span><strong>{selectedEvent.name}</strong></div>
+          <div><span>Pass delivery</span><strong>{selectedEvent.whatsapp_enabled ? 'WhatsApp enabled' : 'Manual delivery'}</strong></div>
+          <div><span>Guest options</span><strong>{[selectedEvent.collect_aso_ebi && 'Aso Ebi', selectedEvent.allow_plus_one && 'Plus one', selectedEvent.collect_celebrant && 'Celebrant'].filter(Boolean).join(' · ') || 'Standard admission'}</strong></div>
+        </div>}
       </div>
 
-      {selectedEvent && (
-        <div className="mx-6 mb-4 flex flex-wrap gap-2 rounded-[10px] px-4 py-3 text-xs"
-          style={{ background: 'var(--bg)', color: 'var(--muted)' }}>
-          <span className="font-semibold" style={{ color: 'var(--ink)' }}>Event settings:</span>
-          <span>WhatsApp: <b>{selectedEvent.whatsapp_enabled ? 'On' : 'Off'}</b></span>
-          <span>·</span>
-          <span>Ticket types: <b>{ticketOptions.map(t => t.label).join(', ')}</b></span>
-          {selectedEvent.collect_aso_ebi && <><span>·</span><span>Aso Ebi requests: <b>On</b></span></>}
-          {selectedEvent.allow_plus_one && <><span>·</span><span>Plus one: <b>On</b></span></>}
-          {selectedEvent.collect_celebrant && <><span>·</span><span>Celebrant preference: <b>On</b></span></>}
-        </div>
-      )}
-
-      <div className="flex gap-3 border-t border-[var(--line)] px-6 py-4">
-        <button data-tour="guest-submit-button" type="submit" disabled={submitting}
-          className="flex-1 rounded-full bg-[var(--brand)] py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--brand-strong)] disabled:opacity-60">
-          {submitting ? 'Adding…' : 'Add Guest'}
-        </button>
-        <button type="button" onClick={onCancel}
-          className="flex-1 rounded-full border border-[var(--line)] py-2.5 text-sm font-semibold text-[var(--ink)] transition hover:border-[var(--ink)]">
-          Cancel
-        </button>
+      <div className="form-flow__footer">
+        <button type="button" onClick={() => flowStep === 1 ? onCancel() : setFlowStep((current) => current - 1)} className="admin-secondary-action">{flowStep === 1 ? 'Cancel' : '← Back'}</button>
+        {flowStep < 3 ? <button type="button" onClick={continueFlow} className="admin-primary-action">Continue <span>→</span></button> : <button data-tour="guest-submit-button" type="submit" disabled={submitting} className="admin-primary-action disabled:opacity-60">{submitting ? 'Adding…' : 'Add guest'}</button>}
       </div>
     </form>
   )

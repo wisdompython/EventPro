@@ -1,51 +1,94 @@
 from rest_framework.permissions import BasePermission
 from rest_framework.authentication import SessionAuthentication
-from .models import Role
+from .models import MembershipRole
+from .tenancy import get_request_membership, has_membership_role
 
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
-    """Session auth without CSRF enforcement — safe because CORS + HTTPS protects us."""
-    def enforce_csrf(self, request):
-        return
+    """Deprecated: retained only so old imports fail loudly rather than silently.
+
+    This used to disable CSRF enforcement on every endpoint, on the theory that
+    CORS protected us. It does not: CORS restricts who may *read* a cross-origin
+    response, but a cross-site POST is still delivered and still carries the
+    session cookie. Use SessionAuthentication (the default) instead.
+    """
+
+    def __init__(self, *args, **kwargs):
+        raise RuntimeError(
+            'CsrfExemptSessionAuthentication has been removed. Use '
+            'rest_framework.authentication.SessionAuthentication, which enforces CSRF.'
+        )
 
 
 class IsSuperAdmin(BasePermission):
-    """Full access — only super admins."""
+    """Organization owners/admins, plus platform superusers."""
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.is_super_admin)
+        return bool(
+            request.user and request.user.is_authenticated and
+            (request.user.is_superuser or has_membership_role(request, MembershipRole.ADMIN))
+        )
+
+
+class IsPlatformAdmin(BasePermission):
+    """Operations that are intentionally global across customer organizations."""
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and request.user.is_superuser)
 
 
 class IsEventManagerOrAbove(BasePermission):
     """Super admin or event manager."""
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.is_event_manager)
+        return bool(
+            request.user and request.user.is_authenticated and
+            (request.user.is_superuser or has_membership_role(request, MembershipRole.MANAGER))
+        )
 
 
 class IsCheckInStaffOrAbove(BasePermission):
     """Any authenticated staff (check-in, manager, super admin)."""
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.is_check_in_staff)
+        return bool(
+            request.user and request.user.is_authenticated and
+            (request.user.is_superuser or has_membership_role(request, MembershipRole.CHECK_IN))
+        )
 
 
 class IsScanner(BasePermission):
     """Scanner-only role — QR scan and check-in actions only, no guest list access."""
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.is_scanner)
+        membership = get_request_membership(request)
+        return bool(
+            request.user and request.user.is_authenticated and membership and
+            membership.role == MembershipRole.SCANNER
+        )
 
 
 class IsCheckInOrScanner(BasePermission):
     """Check-in staff, scanner, or above — for scan and check_in actions."""
     def has_permission(self, request, view):
+        membership = get_request_membership(request)
         return bool(
             request.user and request.user.is_authenticated and
-            (request.user.is_check_in_staff or request.user.is_scanner)
+            (request.user.is_superuser or (
+                membership and membership.role in {
+                    MembershipRole.OWNER,
+                    MembershipRole.ADMIN,
+                    MembershipRole.MANAGER,
+                    MembershipRole.CHECK_IN,
+                    MembershipRole.SCANNER,
+                }
+            ))
         )
 
 
 class IsAuthenticatedAnyRole(BasePermission):
     """Any authenticated user (including viewer)."""
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated)
+        return bool(
+            request.user and request.user.is_authenticated and
+            (request.user.is_superuser or get_request_membership(request) is not None)
+        )
 
 
 # Convenience: read-only for viewers/check-in staff, write for managers+
@@ -61,4 +104,4 @@ class ReadOnlyOrEventManager(BasePermission):
             return False
         if request.method in self.SAFE_METHODS:
             return True
-        return request.user.is_event_manager
+        return request.user.is_superuser or has_membership_role(request, MembershipRole.MANAGER)

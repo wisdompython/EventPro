@@ -6,6 +6,8 @@ import { useParams } from 'next/navigation'
 
 import { api, PublicRsvpDetails, RsvpResponseStatus } from '@/lib/api'
 import AsoEbiYardSelector from '@/components/rsvp/AsoEbiYardSelector'
+import { RequirementFields, initialAnswers } from '@/components/rsvp/RequirementFields'
+import type { RequirementAnswerMap } from '@/lib/api'
 
 const RESPONSE_COPY: Record<RsvpResponseStatus, { title: string; body: string }> = {
   awaiting: {
@@ -47,6 +49,7 @@ export default function PublicRsvpPage() {
   const [submitting, setSubmitting] = useState<'yes' | 'no' | null>(null)
   const [answer, setAnswer] = useState<'yes' | 'no' | null>(null)
   const [asoEbiRequested, setAsoEbiRequested] = useState(false)
+  const [requirementAnswers, setRequirementAnswers] = useState<RequirementAnswerMap>({})
   const [asoEbiQuantity, setAsoEbiQuantity] = useState(2)
   const [plusOneAttending, setPlusOneAttending] = useState(false)
   const [plusOneFullName, setPlusOneFullName] = useState('')
@@ -58,6 +61,7 @@ export default function PublicRsvpPage() {
     api.getPublicRsvp(token)
       .then((result) => {
         setDetails(result)
+        setRequirementAnswers(initialAnswers(result.requirements || []))
         setCelebrantName(result.celebrant_name || '')
         setPlusOneAttending(result.plus_one_attending)
         setPlusOneFullName(result.plus_one_full_name || '')
@@ -69,11 +73,11 @@ export default function PublicRsvpPage() {
 
   async function respond(response: 'yes' | 'no') {
     if (response === 'yes' && asoEbiRequested && asoEbiQuantity < 1) {
-      setError('Choose how many yards of Aso Ebi you need.')
+      setError(`Choose how many ${details?.aso_ebi_unit_term ?? 'yards'} of ${details?.aso_ebi_term ?? 'Aso Ebi'} you need.`)
       return
     }
     if (response === 'yes' && plusOneAttending && (!plusOneFullName.trim() || !plusOnePhoneNumber.trim())) {
-      setError('Enter the full name and WhatsApp phone number of your plus one.')
+      setError(`Enter the full name and WhatsApp phone number of your ${(details?.plus_one_term ?? 'plus one').toLowerCase()}.`)
       return
     }
     setSubmitting(response)
@@ -88,6 +92,7 @@ export default function PublicRsvpPage() {
         plusOneFullName,
         plusOnePhoneNumber,
         celebrantName,
+        requirementAnswers,
       )
       setDetails((current) => current ? {
         ...current,
@@ -138,7 +143,7 @@ export default function PublicRsvpPage() {
         <header className="px-4 py-4 sm:px-7 sm:py-5 lg:px-10" style={{ borderBottom: '1px solid var(--line)', background: 'var(--sidebar)' }}>
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold" style={{ background: 'var(--brand)', color: '#ffffff' }}>T</div>
-            <div><p className="text-sm font-semibold">TWS E-GuestPass</p><p className="text-xs" style={{ color: 'var(--muted)' }}>RSVP</p></div>
+            <div><p className="text-sm font-semibold">Event Pro</p><p className="text-xs" style={{ color: 'var(--muted)' }}>RSVP</p></div>
           </div>
         </header>
 
@@ -198,9 +203,20 @@ export default function PublicRsvpPage() {
                   <div className="mx-auto mt-5 max-w-2xl rounded-[12px] p-4 sm:p-5" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
                     <label className="flex cursor-pointer items-start gap-3">
                       <input type="checkbox" checked={asoEbiRequested} onChange={(event) => setAsoEbiRequested(event.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--brand)]" />
-                      <span><span className="block text-sm font-semibold">I would like to request Aso Ebi</span><span className="mt-1 block text-xs leading-5" style={{ color: 'var(--muted)' }}>Select this to include an Aso Ebi request with your RSVP.</span></span>
+                      <span><span className="block text-sm font-semibold">I would like to request {details.aso_ebi_term}</span><span className="mt-1 block text-xs leading-5" style={{ color: 'var(--muted)' }}>Select this to include a {details.aso_ebi_term} request with your RSVP.</span></span>
                     </label>
-                    {asoEbiRequested && <div className="mt-4"><AsoEbiYardSelector value={asoEbiQuantity} onChange={setAsoEbiQuantity} /></div>}
+                    {asoEbiRequested && <div className="mt-4"><AsoEbiYardSelector value={asoEbiQuantity} onChange={setAsoEbiQuantity} unitTerm={details.aso_ebi_unit_term} term={details.aso_ebi_term} /></div>}
+                  </div>
+                )}
+
+                {answer === 'yes' && (details.requirements || []).length > 0 && (
+                  <div className="mx-auto mt-5 max-w-2xl">
+                    <RequirementFields
+                      requirements={details.requirements}
+                      answers={requirementAnswers}
+                      onChange={setRequirementAnswers}
+                      idPrefix="rsvp"
+                    />
                   </div>
                 )}
 
@@ -208,9 +224,9 @@ export default function PublicRsvpPage() {
                   <div className="mx-auto mt-5 max-w-2xl rounded-[12px] p-4 sm:p-5" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
                     <label className="flex cursor-pointer items-start gap-3">
                       <input type="checkbox" checked={plusOneAttending} onChange={(event) => { setPlusOneAttending(event.target.checked); if (!event.target.checked) { setPlusOneFullName(''); setPlusOnePhoneNumber('') } }} className="mt-0.5 h-4 w-4 accent-[var(--brand)]" />
-                      <span><span className="block text-sm font-semibold">I’m bringing a plus one</span><span className="mt-1 block text-xs leading-5" style={{ color: 'var(--muted)' }}>Provide their details so they can receive their own QR pass immediately.</span></span>
+                      <span><span className="block text-sm font-semibold">I’m bringing a {details.plus_one_term.toLowerCase()}</span><span className="mt-1 block text-xs leading-5" style={{ color: 'var(--muted)' }}>Provide their details so they can receive their own QR pass immediately.</span></span>
                     </label>
-                    {plusOneAttending && <div className="mt-4 grid gap-3 sm:grid-cols-2"><div><label className="text-xs font-semibold" htmlFor="plus-one-name">Plus one name</label><input id="plus-one-name" value={plusOneFullName} onChange={(event) => setPlusOneFullName(event.target.value)} required placeholder="Full name" className="form-control mt-2" /></div><div><label className="text-xs font-semibold" htmlFor="plus-one-phone">WhatsApp phone number</label><input id="plus-one-phone" type="tel" value={plusOnePhoneNumber} onChange={(event) => setPlusOnePhoneNumber(event.target.value)} required placeholder="e.g. +234 800 000 0000" className="form-control mt-2" /></div></div>}
+                    {plusOneAttending && <div className="mt-4 grid gap-3 sm:grid-cols-2"><div><label className="text-xs font-semibold" htmlFor="plus-one-name">{details.plus_one_term} name</label><input id="plus-one-name" value={plusOneFullName} onChange={(event) => setPlusOneFullName(event.target.value)} required placeholder="Full name" className="form-control mt-2" /></div><div><label className="text-xs font-semibold" htmlFor="plus-one-phone">WhatsApp phone number</label><input id="plus-one-phone" type="tel" value={plusOnePhoneNumber} onChange={(event) => setPlusOnePhoneNumber(event.target.value)} required placeholder="e.g. +234 800 000 0000" className="form-control mt-2" /></div></div>}
                   </div>
                 )}
 
@@ -251,5 +267,5 @@ function ResponseCard({ details }: { details: PublicRsvpDetails }) {
       ? 'Please contact the event organiser if you need assistance.'
       : RESPONSE_COPY[details.response_status].body
 
-  return <div className="mt-8 rounded-[12px] px-4 py-5 text-center" style={{ background: details.response_status === 'confirmed' ? 'var(--success-bg)' : 'var(--bg)', border: '1px solid var(--line)' }}><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full text-lg" style={{ background: details.response_status === 'confirmed' ? 'var(--success)' : 'var(--panel-2)', color: details.response_status === 'confirmed' ? '#ffffff' : 'var(--muted)' }}>{details.response_status === 'confirmed' ? '✓' : '—'}</div><h2 className="mt-3 text-base font-bold">{title}</h2><p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>{body}</p>{details.response_status === 'confirmed' && details.celebrant_name && <p className="mt-3 text-sm font-semibold" style={{ color: 'var(--brand)' }}>Celebrant: {details.celebrant_name}</p>}{details.response_status === 'confirmed' && details.plus_one_attending && <p className="mt-3 text-sm font-semibold" style={{ color: 'var(--brand)' }}>Plus one: {details.plus_one_full_name || 'Pass queued'}</p>}{details.response_status === 'confirmed' && details.aso_ebi_requested && <p className="mt-3 text-sm font-semibold" style={{ color: 'var(--brand)' }}>Aso Ebi requested: {details.aso_ebi_quantity} yards</p>}</div>
+  return <div className="mt-8 rounded-[12px] px-4 py-5 text-center" style={{ background: details.response_status === 'confirmed' ? 'var(--success-bg)' : 'var(--bg)', border: '1px solid var(--line)' }}><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full text-lg" style={{ background: details.response_status === 'confirmed' ? 'var(--success)' : 'var(--panel-2)', color: details.response_status === 'confirmed' ? '#ffffff' : 'var(--muted)' }}>{details.response_status === 'confirmed' ? '✓' : '—'}</div><h2 className="mt-3 text-base font-bold">{title}</h2><p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>{body}</p>{details.response_status === 'confirmed' && details.celebrant_name && <p className="mt-3 text-sm font-semibold" style={{ color: 'var(--brand)' }}>Celebrant: {details.celebrant_name}</p>}{details.response_status === 'confirmed' && details.plus_one_attending && <p className="mt-3 text-sm font-semibold" style={{ color: 'var(--brand)' }}>{details.plus_one_term}: {details.plus_one_full_name || 'Pass queued'}</p>}{details.response_status === 'confirmed' && details.aso_ebi_requested && <p className="mt-3 text-sm font-semibold" style={{ color: 'var(--brand)' }}>{details.aso_ebi_term} requested: {details.aso_ebi_quantity} {details.aso_ebi_unit_term}</p>}</div>
 }

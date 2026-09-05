@@ -24,7 +24,7 @@ export function SplitSection() {
               </div>
             ))}
           </div>
-          <Link href="/admin/dashboard" className="mt-8 inline-block rounded-lg px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90" style={{ background: 'var(--brand)' }}>
+          <Link href="/admin/today" className="mt-8 inline-block rounded-lg px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90" style={{ background: 'var(--brand)' }}>
             Open Dashboard
           </Link>
         </div>

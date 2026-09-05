@@ -1,27 +1,29 @@
 @import "tailwindcss";
 
 :root {
-  /* ── Ops console palette (light) ── */
-  --bg:           #f6f4ee;          /* page / main content background */
+  /* ── Event Pro — ink violet, soft lilac and coral ── */
+  --bg:           #f4f1f7;
   --panel:        #ffffff;          /* card / panel background */
-  --panel-2:      #f1eee6;          /* slightly elevated panel */
-  --ink:          #23262e;          /* primary text */
-  --ink-2:        #3d434f;
-  --muted:        #6b7280;          /* secondary / label text */
-  --muted-2:      #9aa1ad;          /* tertiary / placeholder */
-  --line:         rgba(23,26,33,0.10);   /* dividers */
-  --line-2:       rgba(23,26,33,0.06);
-  --line-strong:  rgba(23,26,33,0.20);   /* dashed / emphasised borders */
-  --chip:         rgba(23,26,33,0.05);   /* subtle fills, chips, hovers */
+  --panel-2:      #ece8f2;
+  --ink:          #171522;
+  --ink-2:        #464050;
+  --muted:        #716a7b;
+  --muted-2:      #9a93a3;
+  --line:         rgba(35,29,55,0.12);
+  --line-2:       rgba(35,29,55,0.06);
+  --line-strong:  rgba(35,29,55,0.22);
+  --chip:         rgba(103,87,217,0.07);
   --field:        #ffffff;          /* input / select background */
 
-  --brand:        #8a6f2b;          /* TWS gold, darkened for light bg */
-  --brand-strong: #6f5920;
-  --brand-soft:   rgba(184,150,62,0.16);
+  --brand:        #6757d9;
+  --brand-strong: #4c3cbb;
+  --brand-soft:   rgba(103,87,217,0.13);
+  --accent:       #ee7651;
+  --accent-soft:  rgba(238,118,81,0.14);
 
-  --sidebar:      #f0ede5;          /* sidebar background */
-  --sidebar-2:    rgba(23,26,33,0.05);   /* nav item hover */
-  --sidebar-line: rgba(23,26,33,0.08);
+  --sidebar:      #e9e5f1;
+  --sidebar-2:    rgba(103,87,217,0.08);
+  --sidebar-line: rgba(35,29,55,0.08);
 
   --success:      #0e8f6b;
   --success-bg:   rgba(14,143,107,0.12);
@@ -32,9 +34,9 @@
   --info:         #2563eb;
   --info-bg:      rgba(37,99,235,0.10);
 
-  --font-sans:    var(--loaded-sans, 'Inter', 'Segoe UI', system-ui, sans-serif);
-  --font-display: var(--loaded-sans, 'Inter', 'Segoe UI', system-ui, sans-serif);
-  --font-mono:    'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --font-sans:    Aptos, 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-display: 'Trebuchet MS', Aptos, 'Segoe UI', sans-serif;
+  --font-mono:    'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
 }
 
 html {
@@ -52,7 +54,7 @@ body {
 }
 
 ::selection {
-  background: rgba(184, 150, 62, 0.20);
+  background: rgba(103,87,217,0.22);
 }
 
 .font-display {
@@ -105,7 +107,7 @@ body {
 
 .form-control:focus {
   border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(184,150,62,0.18);
+  box-shadow: 0 0 0 3px rgba(15,118,110,0.16);
   background: var(--field);
 }
 
@@ -161,7 +163,7 @@ textarea.form-control {
 }
 
 .form-choice:hover {
-  border-color: rgba(184,150,62,0.45);
+  border-color: rgba(15,118,110,0.42);
   transform: translateY(-1px);
 }
 

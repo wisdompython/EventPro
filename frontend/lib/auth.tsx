@@ -4,13 +4,16 @@ import {
   createContext, useContext, useEffect, useState, useCallback, ReactNode,
 } from 'react'
 import { useRouter } from 'next/navigation'
-import { api, AuthUser, UserRole } from './api'
+import { api, AuthUser, SignupPayload, UserRole } from './api'
 
 interface AuthContextValue {
   user: AuthUser | null
   loading: boolean
   login: (username: string, password: string) => Promise<void>
+  signup: (data: SignupPayload) => Promise<void>
   logout: () => Promise<void>
+  switchOrganization: (organizationId: number) => Promise<void>
+  refreshUser: () => Promise<void>
   // Role helpers
   isSuperAdmin: boolean
   isEventManager: boolean   // event_manager OR super_admin
@@ -48,11 +51,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Navigation is handled by the calling page (supports ?next= redirect)
   }, [])
 
+  const signup = useCallback(async (data: SignupPayload) => {
+    const nextUser = await api.signup(data)
+    setUser(nextUser)
+  }, [])
+
   const logout = useCallback(async () => {
     await api.logout().catch(() => {})
     setUser(null)
     router.replace('/login')
   }, [router])
+
+  const refreshUser = useCallback(async () => {
+    const nextUser = await api.me()
+    setUser(nextUser)
+  }, [])
+
+  const switchOrganization = useCallback(async (organizationId: number) => {
+    if (user?.active_organization?.id === organizationId) return
+    await api.activateOrganization(organizationId)
+    const nextUser = await api.me()
+    setUser(nextUser)
+    window.location.assign('/admin/today')
+  }, [user])
 
   const can = useCallback((minRole: UserRole) => {
     if (!user) return false
@@ -63,7 +84,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     loading,
     login,
+    signup,
     logout,
+    switchOrganization,
+    refreshUser,
     isSuperAdmin:   user?.role === 'super_admin',
     isEventManager: can('event_manager'),
     isCheckInStaff: can('check_in_staff'),
@@ -90,9 +114,9 @@ export function useRequireAuth(minRole?: UserRole) {
     if (!user) { router.replace('/login'); return }
     // Scanners can only access the check-in page
     if (user.role === 'scanner' && minRole && minRole !== 'scanner') {
-      router.replace('/admin/check-in'); return
+      router.replace('/admin/door-desk'); return
     }
-    if (minRole && !can(minRole)) { router.replace('/admin/dashboard'); return }
+    if (minRole && !can(minRole)) { router.replace('/admin/today'); return }
   }, [user, loading, minRole, can, router])
 
   return { user, loading }

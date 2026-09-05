@@ -38,6 +38,8 @@ export const guestsApi = {
     aso_ebi_requested: boolean
     aso_ebi_quantity: number
     celebrant_name: string
+    /** Answers to configured questions, keyed by requirement key. */
+    requirements?: Record<string, unknown>
   }) => request<{
     saved: boolean
     submitted_at: string

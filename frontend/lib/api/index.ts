@@ -4,6 +4,9 @@ import { eventsApi, fontsApi } from './events';
 import { remindersApi } from './reminders';
 import { rsvpApi } from './rsvp';
 import { operationsApi } from './operations';
+import { requirementsApi } from './requirements';
+import { seatingApi } from './seating';
+import { preferencesApi } from './preferences';
 
 export const api = {
   ...authApi,
@@ -13,6 +16,9 @@ export const api = {
   ...remindersApi,
   ...rsvpApi,
   ...operationsApi,
+  ...requirementsApi,
+  ...seatingApi,
+  ...preferencesApi,
 };
 
 export type {
@@ -21,4 +27,8 @@ export type {
   RsvpRecipientSegment, RsvpResponseStatus, RsvpInvitationStatus, RsvpPassStatus,
   PaginatedRsvpRecipients, PublicRsvpDetails,
   QueueMonitorSnapshot,
+  SeatingTable, SeatingSection, SeatingTableGuests, CreateSeatingSectionPayload, SeatingFeature,
+  SeatingPathPoint,
+  PreferenceDashboard, PreferenceGuest, PreferenceAnswer, PreferenceQuestionTotal,
+  PreferenceSeatingGuest, PreferenceSeatingTable,
 } from './types';

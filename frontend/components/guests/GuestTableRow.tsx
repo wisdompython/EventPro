@@ -45,7 +45,7 @@ export function GuestTableRow({ g, isSel, deleting, showPhone = false, onToggleS
           <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
             style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>{initials}</div>
           <div>
-            <Link href={`/admin/guests/${g.id}`} className="font-semibold hover:underline" style={{ color: 'var(--ink)' }}>{g.full_name}</Link>
+            <Link href={`/admin/guestbook/${g.id}`} className="font-semibold hover:underline" style={{ color: 'var(--ink)' }}>{g.full_name}</Link>
             <p className="text-[11px] font-mono" style={{ color: 'var(--muted-2)' }}>
               G-{g.id.slice(-3).toUpperCase()}
               {g.ticket_type === 'vip' && <span className="ml-1.5 text-[10px]" style={{ color: 'var(--muted)' }}>· VIP</span>}
@@ -78,7 +78,7 @@ export function GuestTableRow({ g, isSel, deleting, showPhone = false, onToggleS
       <td className="px-4 py-3 font-mono text-[12px]" style={{ color: 'var(--muted-2)' }}>{checkedInTime || '—'}</td>
       <td className="px-4 py-3">
         <div className="flex items-center gap-1">
-          <Link href={`/admin/guests/${g.id}`} className="p-1 transition hover:opacity-70" style={{ color: 'var(--muted)' }} title="View">
+          <Link href={`/admin/guestbook/${g.id}`} className="p-1 transition hover:opacity-70" style={{ color: 'var(--muted)' }} title="View">
             <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
             </svg>

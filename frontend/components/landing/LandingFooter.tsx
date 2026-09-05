@@ -1,34 +1,55 @@
 import Link from 'next/link'
 
+const footerLinks = [
+  {
+    title: 'Platform',
+    links: [
+      ['What we do', '#product'],
+      ['Features', '#features'],
+      ['How it works', '#workflow'],
+      ['Create workspace', '/signup'],
+      ['Sign in', '/login'],
+    ],
+  },
+  {
+    title: 'Built for',
+    links: [
+      ['Event agencies', '#about'],
+      ['Independent planners', '#about'],
+      ['Venues & teams', '#about'],
+      ['Enterprise events', '#about'],
+    ],
+  },
+]
+
 export function LandingFooter() {
   return (
-    <footer style={{ background: '#fff', borderTop: '1px solid var(--line)' }}>
-      <div className="mx-auto max-w-6xl px-6 py-12 sm:px-10 lg:grid lg:grid-cols-[1.5fr_1fr_1fr] lg:gap-10">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold text-white" style={{ background: 'var(--brand)' }}>G</div>
-            <span className="text-sm font-bold" style={{ color: 'var(--ink)' }}>TWS E-GuestPass</span>
+    <footer className="landing-footer">
+      <div className="landing-shell landing-footer__grid">
+        <div className="landing-footer__brand">
+          <Link href="/" className="flex items-center gap-2.5" aria-label="Event Pro home">
+            <div className="landing-logo landing-logo--footer">EP</div>
+            <span>Event Pro</span>
+          </Link>
+          <p>The calm command centre for modern event and guest operations.</p>
+          <span className="landing-footer__status"><i /> Workspace signup is available</span>
+        </div>
+
+        {footerLinks.map((group) => (
+          <div key={group.title} className="landing-footer__links">
+            <p>{group.title}</p>
+            {group.links.map(([label, href]) => <Link key={label} href={href}>{label}</Link>)}
           </div>
-          <p className="mt-3 max-w-xs text-sm leading-6" style={{ color: 'var(--muted)' }}>
-            The enterprise standard for high-stakes event guest management. Built for precision and scale.
-          </p>
-        </div>
-        <div>
-          <p className="mb-4 text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--muted-2)' }}>Platform</p>
-          {['Dashboard', 'Guest List', 'Bulk Upload', 'Check-In Scanner'].map(l => (
-            <Link key={l} href="/admin/dashboard" className="mb-2 block text-sm transition hover:opacity-60" style={{ color: 'var(--muted)' }}>{l}</Link>
-          ))}
-        </div>
-        <div>
-          <p className="mb-4 text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--muted-2)' }}>Resources</p>
-          {['Documentation', 'Support Center', 'Security', 'Privacy Policy'].map(l => (
-            <Link key={l} href="/admin/dashboard" className="mb-2 block text-sm transition hover:opacity-60" style={{ color: 'var(--muted)' }}>{l}</Link>
-          ))}
+        ))}
+
+        <div className="landing-footer__note">
+          <p>From invitation to arrival</p>
+          <strong>Every guest deserves a thoughtful welcome.</strong>
         </div>
       </div>
-      <div className="mx-auto max-w-6xl px-6 py-4 sm:px-10 flex justify-between" style={{ borderTop: '1px solid var(--line)' }}>
-        <p className="text-xs" style={{ color: 'var(--muted-2)' }}>© 2026 TWS E-GuestPass. All rights reserved.</p>
-        <p className="text-xs" style={{ color: 'var(--muted-2)' }}>Terms of Service · Cookie Policy</p>
+      <div className="landing-shell landing-footer__bottom">
+        <p>© 2026 Event Pro. Built for the people behind the experience.</p>
+        <div><Link href="/signup">Create workspace</Link><Link href="/login">Sign in</Link></div>
       </div>
     </footer>
   )

@@ -5,10 +5,28 @@ export function getCsrfToken(): string {
   return document.cookie.split('; ').find((c) => c.startsWith('csrftoken='))?.split('=')[1] ?? ''
 }
 
+const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS', 'TRACE']
+
+/**
+ * Ask the API to set a csrftoken cookie. Safe to call repeatedly.
+ * Needed before the first mutating request of a session, because Django only
+ * sets the cookie on a view that has been through CsrfViewMiddleware.
+ */
+export async function ensureCsrfToken(): Promise<string> {
+  const existing = getCsrfToken()
+  if (existing) return existing
+  await fetch(`${BASE_URL}/auth/csrf/`, { credentials: 'include' }).catch(() => {})
+  return getCsrfToken()
+}
+
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const isFormData = options?.body instanceof FormData
+  const method = (options?.method ?? 'GET').toUpperCase()
+  const needsCsrf = !SAFE_METHODS.includes(method)
+  const csrfToken = needsCsrf ? await ensureCsrfToken() : ''
   const headers: Record<string, string> = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(needsCsrf && csrfToken ? { 'X-CSRFToken': csrfToken } : {}),
     ...(options?.headers as Record<string, string> ?? {}),
   }
   const res = await fetch(`${BASE_URL}${path}`, {

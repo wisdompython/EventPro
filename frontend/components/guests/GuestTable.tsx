@@ -34,7 +34,7 @@ function GuestCard({ g, isSel, deleting, showPhone, onToggleSelect, onDelete }: 
         style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>{initials}</div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <Link href={`/admin/guests/${g.id}`} className="text-sm font-semibold hover:underline truncate"
+          <Link href={`/admin/guestbook/${g.id}`} className="text-sm font-semibold hover:underline truncate"
             style={{ color: 'var(--ink)' }}>{g.full_name}</Link>
           <span className="flex-shrink-0 px-2 py-0.5 text-[10px] font-bold"
             style={{

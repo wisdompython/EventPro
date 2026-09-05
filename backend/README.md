@@ -1,1 +1,1 @@
-# guest-management-system
+# Event Pro backend

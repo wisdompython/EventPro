@@ -1,0 +1,932 @@
+/* Seating plan builder — a drag-and-drop canvas plus an editing panel. */
+
+.seating-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  align-items: start;
+  gap: 20px;
+}
+
+.seating-canvas-wrap {
+  min-width: 0;
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: var(--admin-surface);
+  padding: 16px;
+  box-shadow: var(--admin-shadow);
+}
+
+.seating-canvas-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-height: 40px;
+  margin: -4px -4px 12px;
+  border: 1px solid rgba(35, 29, 55, 0.1);
+  border-radius: 10px 3px 10px 3px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 5px 7px;
+  box-shadow: 0 5px 16px rgba(35, 29, 55, 0.08);
+  backdrop-filter: blur(12px);
+}
+.seating-canvas-toolbar button {
+  display: grid;
+  min-width: 34px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgba(35, 29, 55, 0.13);
+  border-radius: 8px 3px 8px 3px;
+  background: white;
+  padding: 0 9px;
+  color: #5f5a70;
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+.seating-canvas-toolbar button:hover,
+.seating-canvas-toolbar button.is-active { border-color: #6757d9; background: #f0edff; color: #4d3fc0; }
+.seating-canvas-toolbar__zoom { display: flex; align-items: center; gap: 3px; }
+.seating-canvas-toolbar__zoom button { padding: 0; font-size: 1rem; }
+.seating-canvas-toolbar__zoom output { min-width: 46px; color: #756e7f; font-size: 0.66rem; font-weight: 800; text-align: center; }
+.seating-canvas-toolbar__spacer { flex: 1; }
+.seating-canvas-toolbar .seating-canvas-toolbar__focus { grid-auto-flow: column; gap: 7px; border-color: #6757d9; background: #6757d9; color: white; }
+.seating-canvas-toolbar .seating-canvas-toolbar__focus:hover { border-color: #5144bd; background: #5144bd; color: white; }
+.seating-canvas-toolbar .seating-canvas-toolbar__export { grid-auto-flow: column; gap: 7px; }
+.seating-canvas-toolbar__exports {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-left: 1px solid rgba(35, 29, 55, 0.1);
+  padding-left: 8px;
+}
+.seating-canvas-toolbar__exports > span {
+  margin-right: 2px;
+  color: #756e7f;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.seating-canvas-toolbar__exports .seating-canvas-toolbar__export {
+  min-width: 45px;
+  border-color: rgba(228, 87, 61, 0.28);
+  color: #b83f2b;
+}
+.seating-canvas-toolbar__exports .seating-canvas-toolbar__export:hover {
+  border-color: #e4573d;
+  background: #fff2ed;
+  color: #a93625;
+}
+.seating-canvas-toolbar button:disabled { cursor: not-allowed; opacity: 0.45; }
+
+.seating-canvas-stage {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 0 auto;
+}
+
+.seating-page.is-canvas-focused {
+  max-width: none;
+  padding: 12px;
+}
+.seating-page.is-canvas-focused > :is(.admin-page__header, .seating-stats, .seating-capacity-meter, .seating-map-legend) { display: none; }
+.seating-layout.is-canvas-focused { grid-template-columns: minmax(0, 1fr); }
+.seating-layout.is-canvas-focused .seating-aside { display: none; }
+.seating-layout.is-canvas-focused .seating-canvas-wrap {
+  min-height: calc(100vh - 99px);
+  max-height: calc(100vh - 99px);
+}
+
+/* The room. A dotted grid reads as a floor without competing with the blocks. */
+.seating-canvas {
+  position: relative;
+  overflow: hidden;
+  transform-origin: top left;
+  border: 1px solid var(--admin-line);
+  border-radius: 3px;
+  background-image: radial-gradient(rgba(16, 35, 29, 0.14) 1px, transparent 1px);
+  background-size: 26px 26px;
+  background-color: #faf8f3;
+  touch-action: none;
+}
+
+.seating-canvas__size {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  z-index: 40;
+  border: 1px solid rgba(16, 35, 29, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 5px 32px 5px 10px;
+  color: #5f5a70;
+  font-size: 0.72rem;
+  font-weight: 800;
+  box-shadow: 0 4px 14px rgba(16, 35, 29, 0.1);
+  pointer-events: none;
+}
+
+.seating-canvas__resize {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  z-index: 45;
+  width: 26px;
+  height: 26px;
+  cursor: nwse-resize;
+  border: 0;
+  border-radius: 8px 2px 2px 2px;
+  background: #e4573d;
+  box-shadow: 0 5px 14px rgba(228, 87, 61, 0.3);
+  touch-action: none;
+}
+.seating-canvas__resize::before,
+.seating-canvas__resize::after {
+  content: '';
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 8px;
+  height: 1.5px;
+  transform: rotate(-45deg);
+  transform-origin: center;
+  border-radius: 2px;
+  background: white;
+}
+.seating-canvas__resize::after { right: 4px; bottom: 4px; width: 13px; }
+.seating-canvas__resize:hover,
+.seating-canvas__resize:focus-visible { background: #bf402b; outline: 3px solid rgba(228, 87, 61, 0.2); outline-offset: 2px; }
+
+.seating-canvas-warning {
+  margin: 10px 0 0;
+  border-left: 3px solid #e4573d;
+  background: #fff4ef;
+  padding: 8px 10px;
+  color: #85402f;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+/* A section: a labelled container holding its tables. */
+.seating-section {
+  position: absolute;
+  z-index: 2;
+  cursor: grab;
+  border: 1.5px dashed rgba(16, 35, 29, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.seating-section:active { cursor: grabbing; }
+.seating-section:hover { border-color: #10231d; }
+.seating-section:focus-visible { outline: 2px solid #e4573d; outline-offset: 3px; }
+.seating-section.is-selected {
+  z-index: 10;
+  border-color: #e4573d;
+  border-style: solid;
+  background: rgba(255, 245, 242, 0.85);
+  box-shadow: 0 0 0 3px rgba(228, 87, 61, 0.14);
+}
+/* Priority zones read differently at a glance. */
+.seating-section.is-reserved { border-color: #b4791b; background: rgba(253, 247, 232, 0.8); }
+.seating-section.is-reserved.is-selected { border-color: #e4573d; }
+
+.seating-section__head {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 34px;
+  padding: 0 11px;
+}
+.seating-section__name {
+  max-width: calc(100% - 74px);
+  overflow: hidden;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 1px 5px;
+  margin-left: -3px;
+  color: #10231d;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seating-section__head { align-items: flex-start; }
+.seating-section__meta { flex: none; color: #6e766f; font-size: 0.58rem; font-weight: 700; white-space: nowrap; }
+.seating-section__meta b { color: #6757d9; font-size: 0.68rem; }
+.seating-section__empty { padding: 0 11px; color: #8b928d; font-size: 0.64rem; }
+
+/* A table inside a section. */
+.seating-table {
+  position: absolute;
+  z-index: 4;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  transition: left 180ms ease, top 180ms ease, width 180ms ease,
+    opacity 160ms ease, filter 160ms ease, transform 160ms ease;
+  user-select: none;
+}
+.seating-table__surface {
+  position: absolute;
+  inset: 19%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  overflow: hidden;
+  border: 1.5px solid rgba(64, 57, 79, 0.34);
+  background: #fff;
+  box-shadow: 0 3px 8px rgba(35, 29, 55, 0.12);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.seating-table--round .seating-table__surface { border-radius: 50%; }
+.seating-table--rectangle .seating-table__surface { inset: 29% 12%; border-radius: 7px; }
+.seating-table:hover .seating-table__surface { border-color: #6757d9; box-shadow: 0 5px 12px rgba(35, 29, 55, 0.18); }
+.seating-table.is-selected {
+  z-index: 30;
+  transform: scale(1.12);
+}
+.seating-table.is-selected .seating-table__surface {
+  border: 2.5px solid #6757d9;
+  background: #f4f1ff;
+  box-shadow: 0 0 0 4px rgba(103, 87, 217, 0.16), 0 9px 22px rgba(35, 29, 55, 0.22);
+}
+/* A full table should be obvious without reading the count. */
+.seating-table.is-full .seating-table__surface { border-color: #2f7d5c; background: #eef7f1; }
+.seating-table.is-full.is-selected .seating-table__surface { border-color: #6757d9; }
+
+.seating-table__seats { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.seating-table__seats > i {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--seat-size);
+  height: var(--seat-size);
+  border: 1px solid rgba(255,255,255,0.9);
+  border-radius: 50%;
+  background: #dedbe5;
+  box-shadow: 0 1px 3px rgba(35, 29, 55, 0.12);
+  transform: translate(-50%, -50%) rotate(var(--seat-angle)) translateY(calc(var(--seat-radius) * -1));
+  transform-origin: center;
+}
+.seating-table__seats > i.is-assigned { background: #9a8cf0; }
+.seating-table.is-selected .seating-table__seats > i { background: #ee7651; box-shadow: 0 1px 4px rgba(202, 69, 42, 0.3); }
+.seating-canvas.has-table-focus .seating-table:not(.is-selected) { opacity: 0.28; filter: saturate(0.45); }
+.seating-canvas.has-table-focus .seating-table.is-selected { opacity: 1; filter: none; }
+
+.seating-table__label {
+  max-width: 90%;
+  overflow: hidden;
+  color: #10231d;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seating-table__count { color: #756e7f; font-size: 0.5rem; font-weight: 750; }
+
+.seating-actions-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.seating-actions-row button { flex: 1; min-width: 72px; }
+
+/* ── Stats strip ─────────────────────────────────────────────────────────── */
+.seating-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.seating-stats > div {
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 12px 14px;
+  box-shadow: var(--admin-shadow);
+}
+.seating-stats small { display: block; color: #6e766f; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.seating-stats strong { display: block; margin-top: 4px; color: #10231d; font-size: 1.4rem; font-weight: 800; letter-spacing: -0.04em; }
+.seating-stats strong em { color: #6e766f; font-size: 0.68rem; font-style: normal; font-weight: 700; letter-spacing: 0; }
+
+.seating-capacity-meter {
+  display: grid;
+  grid-template-columns: minmax(180px, auto) minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin: -6px 0 16px;
+  border: 1px solid rgba(103, 87, 217, 0.2);
+  border-radius: 10px;
+  background: linear-gradient(110deg, rgba(103, 87, 217, 0.1), rgba(255, 255, 255, 0.92));
+  padding: 11px 14px;
+  box-shadow: 0 8px 22px rgba(55, 45, 120, 0.08);
+}
+.seating-capacity-meter span { display: block; color: #6757d9; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; }
+.seating-capacity-meter strong { display: block; margin-top: 2px; color: #171522; font-size: 0.9rem; }
+.seating-capacity-meter p { color: #5f5a70; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+.seating-capacity-meter p span { display: inline; color: #a29cae; font-size: inherit; letter-spacing: 0; }
+.seating-capacity-meter__track { overflow: hidden; height: 8px; border-radius: 99px; background: rgba(103, 87, 217, 0.14); }
+.seating-capacity-meter__track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #6757d9, #9b82f3); transition: width 220ms ease; }
+
+.seating-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin: -4px 2px 10px;
+  color: #5f5a70;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.seating-map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.seating-map-legend i { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9); }
+.seating-map-legend .is-guest { background: #178b63; }
+.seating-map-legend .is-staff { border-radius: 2px; background: #d07b31; }
+.seating-map-legend .is-emergency { background: #c44444; }
+
+/* ── Side panel ──────────────────────────────────────────────────────────── */
+.seating-aside { position: sticky; top: 22px; display: grid; gap: 12px; }
+
+.seating-panel {
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: var(--admin-surface);
+  padding: 16px;
+  box-shadow: var(--admin-shadow);
+}
+.seating-panel h2 { color: #10231d; font-size: 0.82rem; font-weight: 800; letter-spacing: -0.02em; }
+.seating-panel h3 { margin: 14px 0 7px; color: #31443d; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.seating-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.seating-panel--hint p { color: #6e766f; font-size: 0.76rem; line-height: 1.6; }
+.seating-panel--hint p + p { margin-top: 8px; }
+.seating-panel--canvas { border-left: 3px solid #e4573d; }
+.seating-panel--canvas .seating-muted { margin-top: 7px; }
+.seating-form--canvas { margin-top: 10px; }
+.seating-link {
+  border: 0;
+  background: transparent;
+  padding: 3px;
+  color: #6757d9;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.seating-link:hover { color: #4735bd; text-decoration: underline; }
+
+.seating-form { display: grid; gap: 10px; margin-top: 12px; }
+.seating-form__row { display: grid; grid-template-columns: 1fr 90px; gap: 10px; }
+.seating-form label { display: grid; gap: 5px; }
+.seating-form label > span { color: #6e766f; font-size: 0.62rem; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
+.seating-form input, .seating-form select {
+  min-height: 38px;
+  border: 1px solid var(--admin-line);
+  border-radius: 2px;
+  background: #f8f5ee;
+  padding: 0 10px;
+  color: #10231d;
+  font-size: 0.8rem;
+}
+.seating-form input:focus, .seating-form select:focus {
+  border-color: #e4573d;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(228, 87, 61, 0.1);
+}
+.seating-check { display: flex !important; align-items: center; gap: 8px; }
+.seating-check input { min-height: 0; width: 15px; height: 15px; accent-color: #e4573d; }
+.seating-check span { color: #31443d; font-size: 0.74rem; font-weight: 600; text-transform: none; letter-spacing: 0; }
+
+.seating-link-danger { color: #c92828; font-size: 0.68rem; font-weight: 750; }
+.seating-link-danger:hover { text-decoration: underline; }
+
+/* ── Guest lists ─────────────────────────────────────────────────────────── */
+.seating-guests { margin-top: 6px; border-top: 1px solid var(--admin-line); padding-top: 4px; }
+.seating-guest-list { display: grid; gap: 4px; max-height: 190px; overflow-y: auto; }
+.seating-guest-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--admin-line);
+  border-radius: 3px;
+  background: #f8f5ee;
+  padding: 7px 9px;
+}
+.seating-guest-list span { min-width: 0; overflow: hidden; color: #10231d; font-size: 0.74rem; text-overflow: ellipsis; white-space: nowrap; }
+.seating-guest-list button {
+  display: grid;
+  flex: 0 0 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 3px;
+  background: rgba(16, 35, 29, 0.07);
+  color: #31443d;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.seating-guest-list button:hover { background: rgba(16, 35, 29, 0.14); }
+.seating-guest-list button:disabled { opacity: 0.35; cursor: not-allowed; }
+.seating-guest-list--add button { background: rgba(47, 125, 92, 0.13); color: #2f7d5c; }
+.seating-guest-list--add button:hover:not(:disabled) { background: rgba(47, 125, 92, 0.22); }
+
+.seating-muted { color: #8b928d; font-size: 0.73rem; }
+
+/* ── Empty and picker states ─────────────────────────────────────────────── */
+.seating-blank { display: grid; place-items: center; gap: 6px; padding: 54px 20px; text-align: center; }
+.seating-blank h2 { color: #10231d; font-size: 1.05rem; font-weight: 800; }
+.seating-blank > p { color: #6e766f; font-size: 0.8rem; }
+
+.seating-empty { padding: 40px 0; color: #6e766f; font-size: 0.82rem; text-align: center; }
+
+.seating-event-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.seating-event-card {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: var(--admin-surface);
+  padding: 17px;
+  text-align: left;
+  box-shadow: var(--admin-shadow);
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+.seating-event-card:hover { border-color: #10231d; transform: translateY(-1px); }
+.seating-event-card strong { color: #10231d; font-size: 0.85rem; font-weight: 800; }
+.seating-event-card span { color: #6e766f; font-size: 0.72rem; }
+
+/* ── Feedback ────────────────────────────────────────────────────────────── */
+.seating-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  border-radius: 4px;
+  background: rgba(220, 38, 38, 0.06);
+  padding: 11px 14px;
+  color: #c92828;
+  font-size: 0.76rem;
+}
+.seating-alert button { color: #c92828; font-size: 1rem; line-height: 1; }
+
+.seating-toast {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 60;
+  border-radius: 4px;
+  background: #10231d;
+  padding: 11px 16px;
+  color: white;
+  font-size: 0.76rem;
+  font-weight: 650;
+  box-shadow: 0 10px 26px rgba(16, 35, 29, 0.24);
+}
+
+@media (max-width: 1024px) {
+  .seating-layout { grid-template-columns: 1fr; }
+  .seating-aside { position: static; }
+}
+
+@media (max-width: 640px) {
+  .seating-page .admin-page__header { margin-bottom: 16px; }
+  .seating-page .admin-page__description { display: none; }
+
+  .seating-stats {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(106px, 1fr);
+    gap: 7px;
+    overflow-x: auto;
+    margin: 0 -14px 12px;
+    padding: 0 14px 5px;
+    scroll-padding-inline: 14px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+  .seating-stats > div {
+    min-height: 67px;
+    padding: 10px 11px;
+    scroll-snap-align: start;
+  }
+  .seating-stats strong { font-size: 1.18rem; }
+
+  .seating-capacity-meter {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px 12px;
+    margin-bottom: 12px;
+    padding: 10px 11px;
+  }
+  .seating-capacity-meter__track { grid-column: 1 / -1; grid-row: 2; }
+  .seating-capacity-meter p { grid-column: 2; grid-row: 1; align-self: end; white-space: normal; text-align: right; }
+
+  .seating-map-legend {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 12px;
+    overflow-x: auto;
+    margin: 0 -14px 8px;
+    padding: 3px 14px 6px;
+    scrollbar-width: none;
+  }
+  .seating-map-legend::-webkit-scrollbar { display: none; }
+  .seating-map-legend span { flex: 0 0 auto; }
+
+  .seating-layout { gap: 12px; }
+  .seating-canvas-wrap {
+    max-height: 66vh;
+    margin-inline: -6px;
+    padding: 8px;
+    overscroll-behavior: contain;
+  }
+  .seating-canvas-toolbar {
+    display: grid;
+    grid-template-columns: 70px minmax(60px, 1fr) minmax(60px, 1fr) 50px;
+    gap: 5px;
+    margin: -1px -1px 8px;
+    padding: 5px;
+  }
+  .seating-canvas-toolbar__spacer { display: none; }
+  .seating-canvas-toolbar .seating-canvas-toolbar__focus {
+    grid-column: 1;
+    grid-row: 1;
+    width: 70px;
+    min-width: 70px;
+    padding: 0;
+  }
+  .seating-canvas-toolbar__focus span { display: none; }
+  .seating-canvas-toolbar__exports {
+    display: grid;
+    grid-column: 2 / -1;
+    grid-row: 1;
+    grid-template-columns: auto 1fr 1fr;
+    width: 100%;
+    border-left: 0;
+    padding-left: 0;
+  }
+  .seating-canvas-toolbar__exports .seating-canvas-toolbar__export { width: 100%; }
+  .seating-canvas-toolbar__fit { grid-column: 1; grid-row: 2; }
+  .seating-canvas-toolbar > button:last-child { grid-column: 4; grid-row: 2; }
+  .seating-canvas-toolbar__zoom {
+    display: grid;
+    grid-column: 2 / 4;
+    grid-row: 2;
+    grid-template-columns: 1fr 62px 1fr;
+    gap: 5px;
+  }
+  .seating-canvas-toolbar__zoom button { width: 100%; }
+  .seating-canvas-toolbar__zoom output { align-self: center; }
+
+  .seating-canvas__resize { width: 34px; height: 34px; }
+  .seating-canvas__resize::before { right: 8px; bottom: 8px; }
+  .seating-canvas__resize::after { right: 6px; bottom: 6px; }
+  .seating-aside { gap: 10px; }
+  .seating-panel { padding: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seating-section, .seating-table, .seating-event-card { transition: none; }
+  .seating-event-card:hover { transform: none; }
+}
+
+/* Corner handle for resizing a section. */
+.seating-section__resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 15px;
+  height: 15px;
+  cursor: nwse-resize;
+  border-right: 2.5px solid rgba(16, 35, 29, 0.4);
+  border-bottom: 2.5px solid rgba(16, 35, 29, 0.4);
+  border-bottom-right-radius: 4px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.seating-section:hover .seating-section__resize,
+.seating-section.is-selected .seating-section__resize { opacity: 1; }
+.seating-section.is-selected .seating-section__resize { border-color: #e4573d; }
+
+/* The plan can grow beyond the viewport at manual zoom levels. */
+.seating-canvas-wrap { max-height: calc(100vh - 108px); overflow: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .seating-section__resize { transition: none; }
+}
+
+/* ── Venue features ──────────────────────────────────────────────────────── */
+/* Fixtures nobody sits at — the band, a walkway, an exit. They read as part of
+   the room rather than as seating, so they are solid-filled and unlabelled by
+   seat count. */
+.seating-section.is-feature {
+  z-index: 3;
+  display: grid;
+  align-content: start;
+  border-style: solid;
+  border-color: rgba(16, 35, 29, 0.22);
+  background: rgba(16, 35, 29, 0.055);
+}
+.seating-section.is-feature .seating-section__head { height: auto; min-height: 34px; padding-block: 6px; }
+.seating-section.is-feature .seating-section__name {
+  max-width: 100%;
+  overflow: visible;
+  color: #31443d;
+  font-size: 0.7rem;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.seating-section__icon {
+  place-self: center;
+  margin-top: -6px;
+  color: rgba(16, 35, 29, 0.28);
+  font-size: 1.5rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* Each fixture gets its own tint so the plan is readable at a glance. */
+.seating-section.is-stage      { border-color: rgba(124, 58, 173, 0.4); background: rgba(124, 58, 173, 0.09); }
+.seating-section.is-dancefloor { border-color: rgba(37, 99, 235, 0.36);  background: rgba(37, 99, 235, 0.08); }
+.seating-section.is-walkway,
+.seating-section.is-restroom   { border-style: dashed; border-color: rgba(16, 35, 29, 0.3); background: rgba(16, 35, 29, 0.035); }
+.seating-section.is-entrance   { border-color: rgba(47, 125, 92, 0.45); background: rgba(47, 125, 92, 0.1); }
+.seating-section.is-exit       { border-color: rgba(201, 40, 40, 0.4);  background: rgba(201, 40, 40, 0.08); }
+.seating-section.is-bar,
+.seating-section.is-buffet     { border-color: rgba(180, 121, 27, 0.45); background: rgba(180, 121, 27, 0.1); }
+.seating-section.is-cake,
+.seating-section.is-gifts      { border-color: rgba(219, 92, 138, 0.4); background: rgba(219, 92, 138, 0.09); }
+.seating-section.is-photo      { border-color: rgba(14, 138, 145, 0.4); background: rgba(14, 138, 145, 0.09); }
+.seating-section.is-stage { border-width: 2px; border-radius: 22px 22px 7px 7px; box-shadow: inset 0 -9px 0 rgba(124, 58, 173, 0.06); }
+.seating-section.is-dancefloor { border-radius: 24px; background-image: linear-gradient(45deg, rgba(37,99,235,.04) 25%, transparent 25%, transparent 75%, rgba(37,99,235,.04) 75%), linear-gradient(45deg, rgba(37,99,235,.04) 25%, transparent 25%, transparent 75%, rgba(37,99,235,.04) 75%); background-position: 0 0, 16px 16px; background-size: 32px 32px; }
+.seating-section.is-walkway { border-radius: 999px; background-image: linear-gradient(90deg, transparent 48%, rgba(103,87,217,.28) 49%, rgba(103,87,217,.28) 51%, transparent 52%); }
+.seating-section.is-entrance,
+.seating-section.is-guestexit,
+.seating-section.is-serviceexit { border-radius: 999px 12px 12px 999px; }
+.seating-section.is-guestexit { border-color: rgba(47,125,92,.5); background: rgba(47,125,92,.11); }
+.seating-section.is-serviceexit { border-color: rgba(180,121,27,.55); background: rgba(180,121,27,.12); }
+.seating-section.is-exit { border-width: 2px; border-radius: 8px; }
+.seating-section.is-cake { border-radius: 50%; }
+.seating-section.is-photo { border-width: 2px; border-radius: 26px; box-shadow: inset 0 0 0 7px rgba(14,138,145,.035); }
+.seating-section.is-bar { border-radius: 8px 8px 28px 28px; }
+.seating-section.is-buffet { border-radius: 16px; }
+.seating-section.is-restroom { border-radius: 18px; }
+
+/* Bendable venue routes. The section is an invisible bounding box; its line
+   is the object planners see, while selection reveals the editable geometry. */
+.seating-section.is-path {
+  z-index: 5;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.seating-section.is-path:hover { border-color: rgba(103, 87, 217, 0.28); }
+.seating-section.is-path.is-selected {
+  border: 1.5px dashed rgba(228, 87, 61, 0.7);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+}
+.seating-section.is-path .seating-section__head { pointer-events: none; }
+.seating-section.is-path .seating-section__name {
+  width: auto;
+  border: 1px solid rgba(103, 87, 217, 0.34);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 3px 9px;
+  color: #4f42b8;
+  box-shadow: 0 2px 8px rgba(55, 45, 120, 0.1);
+}
+.seating-path {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.seating-path__edge,
+.seating-path__line,
+.seating-path__direction {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.seating-path__edge { stroke: rgba(78, 64, 160, 0.72); stroke-width: 36; }
+.seating-path__line {
+  stroke: #f4f1ff;
+  stroke-width: 29;
+}
+.seating-path__direction {
+  stroke: #6757d9;
+  stroke-width: 3.5;
+  stroke-dasharray: 12 10;
+}
+.seating-path__node {
+  cursor: move;
+  fill: #e4573d;
+  stroke: #ffffff;
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  touch-action: none;
+  filter: drop-shadow(0 2px 3px rgba(124, 49, 32, 0.28));
+}
+.seating-path__node:hover,
+.seating-path__node:focus-visible,
+.seating-path__node.is-selected { fill: #bf402b; stroke: #fff4ef; outline: none; }
+
+.seating-route-help {
+  margin-top: 10px;
+  border-left: 3px solid #6757d9;
+  background: rgba(103, 87, 217, 0.07);
+  padding: 8px 10px;
+  color: #514b63;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+/* Two-click route drawing mode. The full-canvas layer deliberately sits above
+   every block so the start and end can be placed anywhere in the venue. */
+.seating-route-draw-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  background: rgba(103, 87, 217, 0.035);
+  touch-action: none;
+}
+.seating-route-draw-preview__edge,
+.seating-route-draw-preview__line,
+.seating-route-draw-preview__direction {
+  pointer-events: none;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.seating-route-draw-preview__edge { stroke: rgba(78, 64, 160, 0.72); stroke-width: 32; }
+.seating-route-draw-preview__line { stroke: #f4f1ff; stroke-width: 25; }
+.seating-route-draw-preview__direction { stroke: #6757d9; stroke-width: 3; stroke-dasharray: 12 10; }
+.seating-route-draw-preview__point {
+  pointer-events: none;
+  fill: #e4573d;
+  stroke: white;
+  stroke-width: 5;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 3px 5px rgba(124, 49, 32, 0.32));
+}
+.seating-route-draw-banner {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  z-index: 71;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transform: translateX(-50%);
+  border: 2px solid rgba(228, 87, 61, 0.34);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.97);
+  padding: 9px 11px 9px 16px;
+  color: #554e61;
+  box-shadow: 0 10px 26px rgba(35, 29, 55, 0.18);
+  white-space: nowrap;
+}
+.seating-route-draw-banner strong { color: #27214a; font-size: 0.78rem; }
+.seating-route-draw-banner span { font-size: 0.72rem; }
+.seating-route-draw-banner button {
+  border-radius: 999px;
+  background: #fff0eb;
+  padding: 6px 10px;
+  color: #b83f2b;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.seating-route-draw-banner button:hover { background: #ffe4db; }
+
+/* Venue zones sit behind their contents, giving the plan a real spatial
+   hierarchy instead of treating every object as a floating card. */
+.seating-section.is-area,
+.seating-section.is-restricted { z-index: 0; cursor: move; align-content: start; }
+.seating-section.is-area {
+  border: 3px solid rgba(103, 87, 217, 0.34);
+  border-radius: 30px;
+  background: linear-gradient(135deg, rgba(103,87,217,.055), rgba(155,130,243,.025));
+  box-shadow: inset 0 0 0 7px rgba(255,255,255,.68), 0 14px 36px rgba(55,45,120,.08);
+}
+.seating-section.is-area .seating-section__name,
+.seating-section.is-restricted .seating-section__name {
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  color: #4f42b8;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.seating-section.is-area .seating-section__icon { display: none; }
+.seating-section.is-restricted {
+  z-index: 1;
+  border: 2px dashed rgba(190, 74, 50, 0.65);
+  border-radius: 22px;
+  background: repeating-linear-gradient(135deg, rgba(190,74,50,.075) 0, rgba(190,74,50,.075) 12px, rgba(255,255,255,.48) 12px, rgba(255,255,255,.48) 24px);
+  box-shadow: inset 0 0 0 5px rgba(255,255,255,.42);
+}
+.seating-section.is-restricted .seating-section__name { color: #9d3d2c; }
+.seating-section.is-restricted .seating-section__icon { margin-top: 10px; border-radius: 99px; background: #9d3d2c; padding: 5px 9px; color: white; font-size: 0.52rem; font-weight: 900; letter-spacing: .12em; }
+
+/* ── Create-panel tabs ───────────────────────────────────────────────────── */
+.seating-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 3px;
+  background: #f8f5ee;
+  padding: 3px;
+  gap: 3px;
+}
+.seating-tabs button {
+  min-height: 32px;
+  border-radius: 2px;
+  color: #6e766f;
+  font-size: 0.71rem;
+  font-weight: 750;
+  transition: background 140ms ease, color 140ms ease;
+}
+.seating-tabs button.is-active { background: white; color: #10231d; box-shadow: 0 1px 2px rgba(16,35,29,0.1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .seating-tabs button { transition: none; }
+}
+
+/* ── Connectors ──────────────────────────────────────────────────────────── */
+/* A route anchored to a block is drawn on a plan-wide overlay so it can reach
+   across the whole room. The overlay ignores pointer events except on its own
+   bend handles, so blocks underneath stay clickable. */
+.seating-connectors {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: visible;
+  pointer-events: none;
+}
+.seating-connectors circle { pointer-events: auto; }
+
+.seating-connector__edge {
+  fill: none;
+  stroke: rgba(78, 64, 160, 0.72);
+  stroke-width: 30;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.seating-connector__line {
+  fill: none;
+  stroke: #f4f1ff;
+  stroke-width: 24;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.seating-connector__direction {
+  fill: none;
+  stroke: #6757d9;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 12 10;
+}
+.seating-connector__head { fill: #6757d9; }
+
+.seating-connectors g.is-selected .seating-connector__edge {
+  stroke: rgba(228, 87, 61, 0.82);
+}
+.seating-connectors g.is-selected .seating-connector__direction {
+  stroke-width: 4;
+}
+
+/* A connected route's own box is just a handle for selecting it — the line
+   itself is on the overlay, so the box gets out of the way. */
+.seating-section.is-connected {
+  border-style: dotted;
+  background: transparent;
+  opacity: 0.55;
+}
+.seating-section.is-connected.is-selected { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .seating-connector__direction { transition: none; }
+}

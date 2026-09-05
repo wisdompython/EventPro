@@ -68,12 +68,12 @@ export function DeliveryStats({
       <div className="p-4">
         <p className="mb-3 text-[9px] font-semibold uppercase tracking-[0.20em]" style={{ color: 'var(--muted-2)' }}>QUICK ACTIONS</p>
         <div className="space-y-2">
-          <a href="/admin/guests/bulk-upload"
+          <a href="/admin/list-import"
             className="block w-full rounded-lg py-2 text-center text-[12px] font-semibold transition hover:opacity-80"
             style={{ border: '1px solid var(--line)', color: 'var(--ink)', background: 'var(--panel-2)' }}>
             Bulk upload guests
           </a>
-          <a href="/admin/fonts"
+          <a href="/admin/pass-studio"
             className="block w-full rounded-lg py-2 text-center text-[12px] font-semibold transition hover:opacity-80"
             style={{ border: '1px solid var(--line)', color: 'var(--ink)', background: 'var(--panel-2)' }}>
             Pass designer

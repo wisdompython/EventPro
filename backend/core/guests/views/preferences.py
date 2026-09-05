@@ -8,6 +8,9 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from ..models import Guest
+from ..requirements import (
+    RequirementError, describe_requirements, save_requirement_answers,
+)
 
 
 class GuestPreferencesView(APIView):
@@ -44,6 +47,12 @@ class GuestPreferencesView(APIView):
             'venue': event.venue,
             'allow_plus_one': event.allow_plus_one,
             'collect_aso_ebi': event.collect_aso_ebi,
+            'requirements': describe_requirements(
+                event, collect_on='preferences', guest=guest,
+            ),
+            'plus_one_term': event.plus_one_term,
+            'aso_ebi_term': event.aso_ebi_term,
+            'aso_ebi_unit_term': event.aso_ebi_unit_term,
             'collect_celebrant': event.collect_celebrant,
             'celebrant_options': event.celebrant_options or [],
             'plus_one_attending': guest.plus_one_attending,
@@ -97,7 +106,7 @@ class GuestPreferencesView(APIView):
                 return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         if aso_ebi_requested and not event.collect_aso_ebi:
             return Response(
-                {'detail': 'Aso Ebi requests are not enabled for this event.'},
+                {'detail': f'{event.aso_ebi_term} requests are not enabled for this event.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
@@ -106,7 +115,7 @@ class GuestPreferencesView(APIView):
             aso_ebi_quantity = 0
         if aso_ebi_requested and aso_ebi_quantity < 1:
             return Response(
-                {'detail': 'Enter at least 1 yard for the Aso Ebi request.'},
+                {'detail': f'Enter at least 1 {event.aso_ebi_unit_term.rstrip("s")} for the {event.aso_ebi_term} request.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -135,6 +144,16 @@ class GuestPreferencesView(APIView):
             'celebrant_name', 'preferences_submitted_at',
             'plus_one_checked_in', 'plus_one_checked_in_at',
         ])
+        try:
+            save_requirement_answers(
+                guest,
+                request.data.get('requirements'),
+                collect_on='preferences',
+            )
+        except RequirementError as exc:
+            transaction.set_rollback(True)
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         named_plus_one = None
         if guest.plus_one_attending:
             from ..plus_one import upsert_named_plus_one

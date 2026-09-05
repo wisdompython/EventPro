@@ -1,4 +1,5 @@
 import os
+import sys
 from celery.schedules import crontab
 
 # ---------------------------------------------------------------------------
@@ -31,10 +32,15 @@ CELERY_TASK_ROUTES = {
     'rsvp.tasks.*': {'queue': 'messages'},
 }
 
-# In development (DEBUG=True and no broker configured), run tasks synchronously
-# so you don't need Redis or a Celery worker running locally.
+# In development (no broker configured), run tasks synchronously so you don't
+# need Redis or a Celery worker running locally.
+#
+# Under `manage.py test` we always force eager mode. Otherwise a developer with
+# CELERY_BROKER_URL set in .env (the normal local setup) gets a test suite that
+# blocks forever trying to reach a broker instead of running.
 _broker_set = bool(os.environ.get('CELERY_BROKER_URL'))
-CELERY_TASK_ALWAYS_EAGER  = not _broker_set
+_testing = 'test' in sys.argv or bool(os.environ.get('PYTEST_CURRENT_TEST'))
+CELERY_TASK_ALWAYS_EAGER  = _testing or not _broker_set
 CELERY_TASK_EAGER_PROPAGATES = True
 
 # Periodic tasks (Celery Beat)

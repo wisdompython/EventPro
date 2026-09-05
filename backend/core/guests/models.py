@@ -1,17 +1,38 @@
 import uuid
 from django.db import models
+from accounts.models import get_default_organization_id
 
 
 class Font(models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    organization = models.ForeignKey(
+        'accounts.Organization',
+        on_delete=models.CASCADE,
+        related_name='fonts',
+        default=get_default_organization_id,
+    )
+    name = models.CharField(max_length=100)
     file = models.FileField(upload_to='fonts/')
     uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organization', 'name'],
+                name='unique_font_name_per_organization',
+            ),
+        ]
 
     def __str__(self):
         return self.name
 
 
 class Event(models.Model):
+    organization = models.ForeignKey(
+        'accounts.Organization',
+        on_delete=models.CASCADE,
+        related_name='events',
+        default=get_default_organization_id,
+    )
     name = models.CharField(max_length=255)
     date = models.DateTimeField()
     venue = models.CharField(max_length=255, blank=True)
@@ -97,6 +118,25 @@ class Event(models.Model):
         default=False,
         help_text='Allow confirmed guests to indicate that they will bring one additional guest.',
     )
+    # Wording shown to guests and staff. "Aso Ebi" and "plus one" do not suit
+    # every event (a corporate dinner says "guest", a conference says "fabric"
+    # not at all), so each organiser can rename them per event. Blank means
+    # "use the default", which keeps existing events reading exactly as before.
+    plus_one_label = models.CharField(
+        max_length=40,
+        blank=True,
+        help_text='What to call an additional guest, e.g. "Plus one", "Guest", "Partner". Blank uses "Plus one".',
+    )
+    aso_ebi_label = models.CharField(
+        max_length=40,
+        blank=True,
+        help_text='What to call the fabric or uniform request, e.g. "Aso Ebi", "Fabric". Blank uses "Aso Ebi".',
+    )
+    aso_ebi_unit = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Unit for the quantity requested, e.g. "yards", "metres", "sets". Blank uses "yards".',
+    )
     preferences_enabled = models.BooleanField(
         default=False,
         help_text='Collect guest preferences without requiring RSVP confirmation.',
@@ -128,10 +168,29 @@ class Event(models.Model):
     pass_send_at = models.DateTimeField(null=True, blank=True)
     is_ended = models.BooleanField(default=False)
 
+    # Seating plans use their own coordinate space. Keeping the canvas size on
+    # the event lets planners widen or deepen a venue and retain that work
+    # across devices instead of deriving the room solely from its contents.
+    seating_plan_width = models.PositiveIntegerField(default=1400)
+    seating_plan_height = models.PositiveIntegerField(default=950)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.name
+
+
+    @property
+    def plus_one_term(self) -> str:
+        return self.plus_one_label.strip() or 'Plus one'
+
+    @property
+    def aso_ebi_term(self) -> str:
+        return self.aso_ebi_label.strip() or 'Aso Ebi'
+
+    @property
+    def aso_ebi_unit_term(self) -> str:
+        return self.aso_ebi_unit.strip() or 'yards'
 
 
 class Guest(models.Model):
@@ -187,6 +246,169 @@ class Guest(models.Model):
 
     def __str__(self):
         return f"{self.full_name} — {self.ticket_type or 'guest'}"
+
+
+class GuestRequirement(models.Model):
+    """A question an event asks its guests.
+
+    Aso Ebi, a meal choice, a shuttle seat and a dietary note are all the same
+    shape of thing: a question with a typed answer that the planner needs to
+    total up and hand to a vendor. Modelling that shape once means a new kind of
+    question is configuration rather than a migration plus seven code changes.
+
+    Tenancy is inherited through ``event``, matching Guest.
+    """
+
+    class Kind(models.TextChoices):
+        BOOLEAN = 'boolean', 'Yes / no'
+        QUANTITY = 'quantity', 'Quantity'
+        CHOICE = 'choice', 'Single choice'
+        MULTI_CHOICE = 'multi_choice', 'Multiple choice'
+        TEXT = 'text', 'Short text'
+
+    class AppliesTo(models.TextChoices):
+        # One answer per invitation. Fabric is usually ordered once for a couple.
+        PRIMARY = 'primary', 'Primary guest only'
+        # Every attendee answers for themselves. A companion eats their own meal.
+        EVERYONE = 'everyone', 'Every attending guest'
+
+    class CollectOn(models.TextChoices):
+        RSVP = 'rsvp', 'RSVP page'
+        PREFERENCES = 'preferences', 'Preferences form'
+        BOTH = 'both', 'Both'
+
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name='requirements',
+    )
+    # Stable identifier used by exports and the backfill. Unique per event so a
+    # column heading keeps meaning the same thing even if the label is reworded.
+    key = models.SlugField(max_length=50)
+    label = models.CharField(max_length=120)
+    help_text = models.CharField(max_length=255, blank=True)
+
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    # CHOICE / MULTI_CHOICE only: the options a guest picks from.
+    options = models.JSONField(default=list, blank=True)
+    # QUANTITY only: what is being counted, e.g. "yards", "seats".
+    unit = models.CharField(max_length=20, blank=True)
+
+    required = models.BooleanField(
+        default=False,
+        help_text='Guests must answer before their response is accepted.',
+    )
+    applies_to = models.CharField(
+        max_length=20,
+        choices=AppliesTo.choices,
+        default=AppliesTo.EVERYONE,
+    )
+    collect_on = models.CharField(
+        max_length=20,
+        choices=CollectOn.choices,
+        default=CollectOn.BOTH,
+    )
+    position = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['position', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['event', 'key'],
+                name='unique_requirement_key_per_event',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.label} ({self.event.name})'
+
+    @property
+    def unit_term(self) -> str:
+        return self.unit.strip() or 'units'
+
+    def applies_to_guest(self, guest) -> bool:
+        """Whether this question should be asked of a particular guest."""
+        if self.applies_to == self.AppliesTo.EVERYONE:
+            return True
+        return guest.plus_one_of_id is None
+
+
+class GuestRequirementResponse(models.Model):
+    """One guest's current answer to one requirement.
+
+    Deliberately current-state only: there is no history table and no previous
+    values. Re-answering overwrites.
+
+    Values live in typed columns rather than a single JSON blob so that totals
+    stay database work - SUM(value_int) for fabric, GROUP BY value_text for meal
+    choices - instead of loading every row to parse it in Python.
+    """
+
+    requirement = models.ForeignKey(
+        GuestRequirement,
+        on_delete=models.CASCADE,
+        related_name='responses',
+    )
+    guest = models.ForeignKey(
+        'Guest',
+        on_delete=models.CASCADE,
+        related_name='requirement_responses',
+    )
+
+    value_bool = models.BooleanField(null=True, blank=True)
+    value_int = models.PositiveIntegerField(null=True, blank=True)
+    value_text = models.CharField(max_length=255, blank=True)
+    value_json = models.JSONField(default=list, blank=True)
+
+    responded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['requirement__position', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['requirement', 'guest'],
+                name='unique_response_per_guest_requirement',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['requirement', 'value_text']),
+        ]
+
+    def __str__(self):
+        return f'{self.guest.full_name}: {self.requirement.label}'
+
+    @property
+    def display_value(self) -> str:
+        """Human-readable answer, used by exports and the dashboard."""
+        kind = self.requirement.kind
+        if kind == GuestRequirement.Kind.BOOLEAN:
+            return 'Yes' if self.value_bool else 'No'
+        if kind == GuestRequirement.Kind.QUANTITY:
+            if not self.value_int:
+                return ''
+            return f'{self.value_int} {self.requirement.unit_term}'
+        if kind == GuestRequirement.Kind.MULTI_CHOICE:
+            return ', '.join(self.value_json or [])
+        return self.value_text
+
+    @property
+    def has_answer(self) -> bool:
+        """Whether the guest actually supplied something.
+
+        A false boolean is a real answer ("no, I do not need a shuttle"), so it
+        counts; an unset one does not.
+        """
+        kind = self.requirement.kind
+        if kind == GuestRequirement.Kind.BOOLEAN:
+            return self.value_bool is not None
+        if kind == GuestRequirement.Kind.QUANTITY:
+            return bool(self.value_int)
+        if kind == GuestRequirement.Kind.MULTI_CHOICE:
+            return bool(self.value_json)
+        return bool(self.value_text)
 
 
 class EventReminder(models.Model):
@@ -268,12 +490,24 @@ class BulkUpload(models.Model):
 
 class TemplateCategory(models.Model):
     """Grouping label for WhatsApp templates (e.g. Birthday, Wedding, Corporate)."""
-    name = models.CharField(max_length=100, unique=True)
+    organization = models.ForeignKey(
+        'accounts.Organization',
+        on_delete=models.CASCADE,
+        related_name='template_categories',
+        default=get_default_organization_id,
+    )
+    name = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['name']
         verbose_name_plural = 'template categories'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organization', 'name'],
+                name='unique_template_category_per_organization',
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -297,7 +531,13 @@ class WhatsAppTemplate(models.Model):
         ('rsvp_deadline', 'RSVP response deadline'),
     ]
 
-    name         = models.CharField(max_length=200, unique=True, help_text="Exact template name as in Meta Business Manager")
+    organization = models.ForeignKey(
+        'accounts.Organization',
+        on_delete=models.CASCADE,
+        related_name='whatsapp_templates',
+        default=get_default_organization_id,
+    )
+    name         = models.CharField(max_length=200, help_text="Exact template name as in Meta Business Manager")
     display_name = models.CharField(max_length=200, blank=True, help_text="Friendly label shown in the UI")
     description  = models.TextField(blank=True)
     category     = models.ForeignKey(
@@ -317,6 +557,205 @@ class WhatsAppTemplate(models.Model):
 
     class Meta:
         ordering = ['category__name', 'display_name', 'name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organization', 'name'],
+                name='unique_whatsapp_template_per_organization',
+            ),
+        ]
 
     def __str__(self):
         return self.display_name or self.name
+
+
+class SeatingSection(models.Model):
+    """A named group of tables — "High table", "Grooms family", "Sponsors".
+
+    Sections are how planners actually think about a room: a block of tables
+    set aside for one kind of guest. Creating a section creates its tables in
+    one step, and moving the section moves them together.
+
+    The prefix makes table labels self-describing: a section named "Grooms
+    family" with prefix GF numbers its tables GF-01, GF-02, ... so a table
+    number on a pass or an export says which part of the room it belongs to.
+
+    Tenancy is inherited through ``event``, matching Guest.
+    """
+
+    class Kind(models.TextChoices):
+        # Holds tables guests are seated at.
+        TABLES = 'tables', 'Tables'
+        # Everything else on the floor plan: the band, a walkway, an exit.
+        # These take up room and need labelling, but nobody is seated at them.
+        FEATURE = 'feature', 'Venue feature'
+
+    class Feature(models.TextChoices):
+        STAGE = 'stage', 'Stage / band'
+        DANCEFLOOR = 'dancefloor', 'Dance floor'
+        WALKWAY = 'walkway', 'Walkway / aisle'
+        PATH = 'path', 'Route / path'
+        ENTRANCE = 'entrance', 'Entrance'
+        EXIT = 'exit', 'Exit'
+        GUEST_EXIT = 'guestexit', 'Guest exit'
+        SERVICE_EXIT = 'serviceexit', 'Service exit'
+        BAR = 'bar', 'Bar'
+        BUFFET = 'buffet', 'Buffet / catering'
+        CAKE = 'cake', 'Cake table'
+        GIFTS = 'gifts', 'Gift table'
+        PHOTO = 'photo', 'Photo booth'
+        RESTROOM = 'restroom', 'Restrooms'
+        AREA = 'area', 'Area boundary'
+        RESTRICTED = 'restricted', 'Restricted area'
+        OTHER = 'other', 'Other'
+
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name='seating_sections',
+    )
+    name = models.CharField(max_length=80)
+    kind = models.CharField(
+        max_length=20,
+        choices=Kind.choices,
+        default=Kind.TABLES,
+    )
+    # FEATURE only: which kind of fixture this is, so the plan can draw it
+    # recognisably and the planner can filter by it.
+    feature = models.CharField(
+        max_length=20,
+        choices=Feature.choices,
+        blank=True,
+    )
+    # Short code used to build table labels. Derived from the name when the
+    # planner does not supply one.
+    # Only table sections build labels from a prefix; features leave it blank.
+    prefix = models.CharField(max_length=8, blank=True)
+    # Position of the whole group on the plan; tables are placed relative to it.
+    x = models.FloatField(default=0)
+    y = models.FloatField(default=0)
+    # Tables per row when the section lays its tables out.
+    columns = models.PositiveIntegerField(default=3)
+    # Explicit size in plan units. Null means "fit the tables", which is what a
+    # freshly created section does until the planner resizes it by hand.
+    width = models.FloatField(null=True, blank=True)
+    height = models.FloatField(null=True, blank=True)
+    # FEATURE/path only: bend points stored as normalised coordinates within
+    # the section, e.g. [{"x": 0.05, "y": 0.5}, ...]. Normalised values let
+    # the route scale naturally when its bounding box is resized.
+    path_points = models.JSONField(default=list, blank=True)
+    # FEATURE/path only: optional anchors turning a route into a connector.
+    # An anchored end tracks the block it is attached to, so moving that block
+    # keeps the route joined instead of leaving it dangling. Self-referential
+    # to SeatingSection, so a route can join two sections; the table variants
+    # pin an end to one specific table.
+    path_start_section = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='routes_starting_here',
+    )
+    path_end_section = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='routes_ending_here',
+    )
+    path_start_table = models.ForeignKey(
+        'SeatingTable', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='routes_starting_here',
+    )
+    path_end_table = models.ForeignKey(
+        'SeatingTable', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='routes_ending_here',
+    )
+    # Arrowheads: none, at the end, or at both ends.
+    path_arrows = models.CharField(
+        max_length=10,
+        choices=[('none', 'No arrows'), ('end', 'Arrow at the end'), ('both', 'Both ends')],
+        default='end',
+    )
+    # Reserved sections (high table, family) render differently so priority
+    # zones are visible at a glance.
+    is_reserved = models.BooleanField(
+        default=False,
+        help_text='Marks a priority zone such as the high table.',
+    )
+    note = models.CharField(max_length=255, blank=True)
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['position', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['event', 'name'],
+                name='unique_seating_section_name_per_event',
+            ),
+            models.UniqueConstraint(
+                fields=['event', 'prefix'],
+                # Venue features carry no prefix, and several blanks per event
+                # must stay legal — so the rule covers real prefixes only.
+                condition=~models.Q(prefix=''),
+                name='unique_seating_section_prefix_per_event',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.name} ({self.event.name})'
+
+
+class SeatingTable(models.Model):
+    """One table inside a section.
+
+    Deliberately a block, not a seat map: planners arrange and label tables,
+    then assign guests to them by name. Seat-level placement stays where it
+    already lives - Guest.table_number and Guest.seat_number - so this model
+    adds a plan without changing how check-in, passes or exports read seating.
+
+    Position is stored relative to the owning section, so dragging the section
+    moves every table in it without touching each row.
+    """
+
+    class Shape(models.TextChoices):
+        ROUND = 'round', 'Round'
+        RECTANGLE = 'rectangle', 'Rectangle'
+
+    section = models.ForeignKey(
+        SeatingSection,
+        on_delete=models.CASCADE,
+        related_name='tables',
+    )
+    # Denormalised from section.event so a table can be filtered and uniqueness
+    # checked without a join on every query.
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name='seating_tables',
+    )
+    # Shown on the block and matched against Guest.table_number, which is free
+    # text - so this is a label, not a foreign key. Renaming a table here does
+    # not silently move guests.
+    label = models.CharField(max_length=50)
+    shape = models.CharField(max_length=20, choices=Shape.choices, default=Shape.ROUND)
+    seats = models.PositiveIntegerField(
+        default=8,
+        help_text='How many guests this table holds.',
+    )
+    # Offset from the section's origin, in plan units.
+    x = models.FloatField(default=0)
+    y = models.FloatField(default=0)
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['position', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['event', 'label'],
+                name='unique_seating_table_label_per_event',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.label} ({self.event.name})'
+
+    @property
+    def assigned_count(self) -> int:
+        """Guests whose table_number matches this block's label."""
+        return self.event.guests.filter(table_number=self.label).count()

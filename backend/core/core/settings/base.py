@@ -1,10 +1,16 @@
 from pathlib import Path
 from dotenv import load_dotenv
 import os
+import sys
 
-load_dotenv()
+# Do not let .env clobber variables already exported in the real environment.
+# Without override=False, `FOO=bar python manage.py ...` is silently ignored
+# whenever FOO is also present in .env, which makes CI and one-off overrides
+# behave differently from what the caller asked for.
+load_dotenv(override=False)
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+TESTING = 'test' in sys.argv or bool(os.environ.get('PYTEST_CURRENT_TEST'))
 
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-ek2qjqu48x#&cn8w=!cmc_3b8ql96=xy(=v9svgwzk_&b+)4k(')
 
@@ -31,6 +37,8 @@ INSTALLED_APPS = [
     'accounts',
     'guests',
     'rsvp',
+    # Reads across the others; nothing imports it.
+    'platform_ops',
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
@@ -101,7 +109,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ---------------------------------------------------------------------------
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'accounts.permissions.CsrfExemptSessionAuthentication',
+        # Enforces CSRF on unsafe methods for cookie-authenticated requests.
+        # The browser client bootstraps its token from GET /api/auth/csrf/.
+        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'accounts.permissions.IsAuthenticatedAnyRole',

@@ -6,6 +6,7 @@ from rest_framework import serializers
 logger = logging.getLogger(__name__)
 from ..models import Event, BulkUpload
 from .event import _event_required_fields, _event_valid_ticket_values
+from accounts.tenancy import get_request_organization
 
 
 TRUE_VALUES = {'1', 'true', 'yes', 'y', 'requested'}
@@ -145,6 +146,15 @@ class BulkGuestUploadSerializer(serializers.Serializer):
     def validate_csv_file(self, value):
         if not value.name.endswith('.csv'):
             raise serializers.ValidationError("Only .csv files are accepted.")
+        return value
+
+    def validate_event(self, value):
+        request = self.context.get('request')
+        if request is None:
+            return value
+        organization = get_request_organization(request, required=True)
+        if value.organization_id != organization.id:
+            raise serializers.ValidationError('Event not found.')
         return value
 
     def parse(self):

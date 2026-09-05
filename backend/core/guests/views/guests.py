@@ -17,6 +17,8 @@ from accounts.permissions import (
     IsCheckInStaffOrAbove,
     IsCheckInOrScanner,
 )
+from accounts.tenancy import get_request_organization, has_membership_role
+from accounts.models import MembershipRole
 from .guest_actions import GuestBulkExportMixin
 
 logger = logging.getLogger(__name__)
@@ -55,14 +57,15 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
     }
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        organization = get_request_organization(self.request, required=True)
+        qs = super().get_queryset().filter(event__organization=organization)
         params = self.request.query_params
         if e := params.get('event'):
             qs = qs.filter(event_id=e)
         if search := params.get('search'):
             name_qs = qs.filter(full_name__icontains=search)
             # Only super admins may search by phone number
-            if self.request.user.is_super_admin:
+            if self.request.user.is_superuser or has_membership_role(self.request, MembershipRole.ADMIN):
                 qs = name_qs | qs.filter(phone_number__icontains=search)
             else:
                 qs = name_qs
@@ -179,7 +182,7 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
         if not event_id:
             return Response({'detail': 'event_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
         guest_ids = list(
-            Guest.objects.filter(event_id=event_id).values_list('id', flat=True)
+            self.get_queryset().filter(event_id=event_id).values_list('id', flat=True)
         )
         if not guest_ids:
             return Response({'queued': 0})
@@ -200,7 +203,10 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
         if not event_id:
             return Response({'detail': 'event_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            event = Event.objects.get(pk=event_id)
+            event = Event.objects.get(
+                pk=event_id,
+                organization=get_request_organization(request, required=True),
+            )
         except Event.DoesNotExist:
             return Response({'detail': 'Event not found.'}, status=status.HTTP_404_NOT_FOUND)
         if event.date and event.date < tz.now():
@@ -224,7 +230,10 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         with transaction.atomic():
-            guest = Guest.objects.select_for_update().select_related('event').get(pk=pk)
+            # The base queryset eager-loads nullable plus-one relationships.
+            # Lock only the guest row so PostgreSQL does not try to lock the
+            # nullable side of those outer joins.
+            guest = self.get_queryset().select_for_update(of=('self',)).get(pk=pk)
             now = timezone.now()
             update_fields = []
 
@@ -317,7 +326,7 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
         guest_id = raw.split('|')[0] if '|' in raw else raw
 
         try:
-            guest = Guest.objects.select_related('event').get(id=guest_id)
+            guest = self.get_queryset().get(id=guest_id)
         except (Guest.DoesNotExist, ValueError):
             return Response({'detail': 'Invalid QR code.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response(GuestSerializer(guest).data)
+        return Response(GuestSerializer(guest, context={'request': request}).data)

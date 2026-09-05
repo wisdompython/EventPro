@@ -6,6 +6,7 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.http import StreamingHttpResponse
+from guests.requirements import describe_requirements
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -16,6 +17,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounts.permissions import ReadOnlyOrEventManager
+from accounts.tenancy import get_request_organization
 from guests.csv_utils import safe_csv_row
 from guests.models import Event, Guest
 
@@ -154,7 +156,8 @@ class RsvpWorkflowViewSet(viewsets.ModelViewSet):
     )
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        organization = get_request_organization(self.request, required=True)
+        qs = super().get_queryset().filter(event__organization=organization)
         # Collection filters must not hide a detail action's workflow. Export
         # reuses `search` for guest names, while the workflow list uses it for
         # event names.
@@ -520,7 +523,10 @@ class RsvpRecipientViewSet(viewsets.ReadOnlyModelViewSet):
     )
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        organization = get_request_organization(self.request, required=True)
+        qs = super().get_queryset().filter(
+            workflow__event__organization=organization,
+        )
         if workflow_id := self.request.query_params.get('workflow'):
             qs = qs.filter(workflow_id=workflow_id)
         qs, filter_errors = _apply_recipient_filters(qs, self.request.query_params)
@@ -787,6 +793,14 @@ class PublicRsvpResponseView(APIView):
                 workflow.event.allow_plus_one
                 and recipient.guest.plus_one_of_id is None
             ),
+            # Organiser wording, already resolved to its default when unset, so
+            # the public page never has to know what the fallback is.
+            'requirements': describe_requirements(
+                workflow.event, collect_on='rsvp', guest=recipient.guest,
+            ),
+            'plus_one_term': workflow.event.plus_one_term,
+            'aso_ebi_term': workflow.event.aso_ebi_term,
+            'aso_ebi_unit_term': workflow.event.aso_ebi_unit_term,
             'collect_celebrant': workflow.event.collect_celebrant,
             'celebrant_options': workflow.event.celebrant_options or [],
             'aso_ebi_requested': recipient.guest.aso_ebi_requested,
@@ -887,6 +901,23 @@ class PublicRsvpResponseView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Validate the configured requirement answers before anything is
+        # recorded: record_response() commits the RSVP, so a late failure here
+        # would leave the guest marked as responded with their answers rejected.
+        from guests.requirements import (
+            RequirementError, clean_requirement_answers, save_requirement_answers,
+        )
+        requirement_answers = request.data.get('requirements')
+        if answer == 'no':
+            # A decline is not the moment to enforce meal choices.
+            requirement_answers = None
+        try:
+            clean_requirement_answers(
+                recipient.guest, requirement_answers, collect_on='rsvp',
+            )
+        except RequirementError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         from .models import RsvpResponse
         from .services import record_response
         result = record_response(
@@ -931,4 +962,10 @@ class PublicRsvpResponseView(APIView):
                 {'detail': result.get('detail', 'The plus one details are invalid.')},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if result.get('accepted') and requirement_answers is not None:
+            recipient.guest.refresh_from_db()
+            save_requirement_answers(
+                recipient.guest, requirement_answers, collect_on='rsvp',
+            )
+
         return Response(result, status=status.HTTP_200_OK if result.get('accepted') else status.HTTP_409_CONFLICT)

@@ -19,6 +19,7 @@ interface Props {
   className?: string
   style?: React.CSSProperties
   'data-tour'?: string
+  'aria-label'?: string
 }
 
 export function SearchableSelect({
@@ -30,6 +31,7 @@ export function SearchableSelect({
   className = '',
   style,
   'data-tour': dataTour,
+  'aria-label': ariaLabel,
 }: Props) {
   const selected = options.find((o) => o.value === value) ?? null
   const [open, setOpen] = useState(false)
@@ -78,6 +80,7 @@ export function SearchableSelect({
         onClick={handleOpen}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={ariaLabel}
         className="w-full flex items-center justify-between gap-2 rounded-[12px] px-4 py-2.5 text-sm text-left focus:outline-none focus:ring-2 focus:ring-[var(--brand)]"
         style={{
           border: '1px solid var(--line)',

@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.db.models import Count, Q, Sum
 from rest_framework import serializers
 from ..models import Event, Font
+from accounts.tenancy import get_request_organization
 
 # Guest fields that can be toggled required/optional per event
 CONFIGURABLE_FIELDS = ['full_name', 'phone_number', 'email', 'table_number', 'seat_number']
@@ -33,6 +34,18 @@ class FontSerializer(serializers.ModelSerializer):
         model = Font
         fields = ('id', 'name', 'file', 'uploaded_at')
         read_only_fields = ('id', 'uploaded_at')
+
+    def validate_name(self, value):
+        request = self.context.get('request')
+        if request is None:
+            return value.strip()
+        organization = get_request_organization(request, required=True)
+        matches = Font.objects.filter(organization=organization, name__iexact=value.strip())
+        if self.instance:
+            matches = matches.exclude(pk=self.instance.pk)
+        if matches.exists():
+            raise serializers.ValidationError('A font with this name already exists in this workspace.')
+        return value.strip()
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -193,7 +206,10 @@ class EventSerializer(serializers.ModelSerializer):
             'name_font', 'name_font_name', 'name_font_color', 'name_font_size_fraction',
             'qr_bg_color',
             'ticket_types', 'required_fields', 'collect_aso_ebi', 'allow_plus_one',
+            'plus_one_label', 'aso_ebi_label', 'aso_ebi_unit',
+            'plus_one_term', 'aso_ebi_term', 'aso_ebi_unit_term',
             'preferences_enabled', 'collect_celebrant', 'celebrant_options', 'whatsapp_enabled',
+            'seating_plan_width', 'seating_plan_height',
             'rsvp_enabled',
             'whatsapp_template', 'whatsapp_template_name',
             'pass_send_at', 'create_rsvp_workflow', 'rsvp_workflow_id',
@@ -202,10 +218,19 @@ class EventSerializer(serializers.ModelSerializer):
             'estimated_guest_count', 'aso_ebi_request_count', 'aso_ebi_quantity',
             'preferences_submitted_count', 'celebrant_breakdown', 'created_at',
         )
-        read_only_fields = ('id', 'created_at', 'name_font_name', 'whatsapp_template_name')
+        read_only_fields = ('id', 'created_at', 'name_font_name', 'whatsapp_template_name', 'plus_one_term', 'aso_ebi_term', 'aso_ebi_unit_term',)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            organization = get_request_organization(request, required=True)
+            name_font = attrs.get('name_font')
+            if name_font and name_font.organization_id != organization.id:
+                raise serializers.ValidationError({'name_font': 'Font not found.'})
+            whatsapp_template = attrs.get('whatsapp_template')
+            if whatsapp_template and whatsapp_template.organization_id != organization.id:
+                raise serializers.ValidationError({'whatsapp_template': 'Template not found.'})
         for field in (
             'rsvp_primary_color', 'rsvp_background_color',
             'rsvp_card_color', 'rsvp_text_color',
@@ -218,6 +243,15 @@ class EventSerializer(serializers.ModelSerializer):
             ):
                 raise serializers.ValidationError({
                     field: 'Enter a six-digit hex colour such as #8a6f2b.',
+                })
+        for field, minimum in (
+            ('seating_plan_width', 1400),
+            ('seating_plan_height', 950),
+        ):
+            value = attrs.get(field, getattr(self.instance, field, minimum) if self.instance else minimum)
+            if value < minimum or value > 5000:
+                raise serializers.ValidationError({
+                    field: f'Use a value between {minimum} and 5000.',
                 })
         event_date = attrs.get('date') or (self.instance.date if self.instance else None)
         pass_send_at = attrs.get(

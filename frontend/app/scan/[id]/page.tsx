@@ -83,7 +83,7 @@ export default function ScanGuestPage({ params }: { params: Promise<{ id: string
         </div>
         <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--ink)' }}>Invalid QR Code</h2>
         <p className="text-sm mb-8" style={{ color: 'var(--muted)' }}>{errorMsg}</p>
-        <button onClick={() => router.push('/admin/check-in')}
+        <button onClick={() => router.push('/admin/door-desk')}
           className="w-full py-3.5 text-sm font-semibold text-white rounded-full"
           style={{ background: 'var(--brand)' }}>
           Back to Scanner
@@ -104,7 +104,7 @@ export default function ScanGuestPage({ params }: { params: Promise<{ id: string
         <h2 className="text-xl font-semibold mb-1" style={{ color: 'var(--ink)' }}>Already Checked In</h2>
         <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>{guest.full_name} was already admitted.</p>
         <GuestInfoCard guest={guest} />
-        <button onClick={() => router.push('/admin/check-in')}
+        <button onClick={() => router.push('/admin/door-desk')}
           className="mt-6 w-full py-3.5 text-sm font-semibold rounded-full"
           style={{ border: '1px solid var(--line)', color: 'var(--ink)', background: 'var(--panel)' }}>
           Back to Scanner
@@ -125,7 +125,7 @@ export default function ScanGuestPage({ params }: { params: Promise<{ id: string
         <h2 className="text-2xl font-semibold mb-1" style={{ color: 'var(--ink)' }}>Welcome!</h2>
         <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>Guest successfully checked in.</p>
         <GuestInfoCard guest={guest} highlight />
-        <button onClick={() => router.push('/admin/check-in')}
+        <button onClick={() => router.push('/admin/door-desk')}
           className="mt-6 w-full py-3.5 text-sm font-semibold text-white rounded-full"
           style={{ background: 'var(--brand)' }}>
           Scan Next Guest
@@ -147,7 +147,7 @@ export default function ScanGuestPage({ params }: { params: Promise<{ id: string
         {guest && guest.status !== 'checked_in' && guest.plus_one_attending && !guest.has_named_plus_one && !guest.plus_one_checked_in && <button onClick={() => handleCheckIn('both')} disabled={state === 'checking_in'} className="w-full rounded-full bg-[var(--ink)] py-4 text-sm font-semibold text-[var(--bg)] disabled:opacity-60">Check in both</button>}
       </div>
       <button
-        onClick={() => router.push('/admin/check-in')}
+        onClick={() => router.push('/admin/door-desk')}
         className="mt-3 w-full py-3 text-sm font-semibold rounded-full transition"
         style={{ border: '1px solid var(--line)', color: 'var(--muted)', background: 'transparent' }}>
         Cancel
