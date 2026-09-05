@@ -122,6 +122,7 @@ REST_FRAMEWORK = {
     'MAX_PAGE_SIZE': 200,
     'DEFAULT_THROTTLE_RATES': {
         'public_rsvp': os.environ.get('PUBLIC_RSVP_THROTTLE_RATE', '30/min'),
+        'password_reset': os.environ.get('PASSWORD_RESET_THROTTLE_RATE', '5/hour'),
     },
 }
 

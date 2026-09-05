@@ -30,6 +30,7 @@ CELERY_TASK_ROUTES = {
     'guests.tasks.dispatch_scheduled_sends': {'queue': 'messages'},
     'guests.tasks.dispatch_due_reminders': {'queue': 'messages'},
     'rsvp.tasks.*': {'queue': 'messages'},
+    'accounts.tasks.send_password_reset_email': {'queue': 'messages'},
 }
 
 # In development (no broker configured), run tasks synchronously so you don't

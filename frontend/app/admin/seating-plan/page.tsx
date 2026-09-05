@@ -293,6 +293,11 @@ export default function SeatingPlanPage() {
   const [draft, setDraft] = useState<SectionDraft>(NEW_SECTION)
   const [creating, setCreating] = useState(false)
   const [routeDrawing, setRouteDrawing] = useState<RouteDrawing | null>(null)
+  const routeDrawGesture = useRef<{
+    pointerId: number
+    start: PlanPoint
+    dragged: boolean
+  } | null>(null)
 
   const [selectedSectionId, setSelectedSectionId] = useState<number | null>(null)
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null)
@@ -564,6 +569,10 @@ export default function SeatingPlanPage() {
     }))
 
     setCreating(true)
+    // Leave drawing mode immediately after accepting the endpoint. This also
+    // prevents a double-click from submitting the same route twice.
+    setRouteDrawing(null)
+    routeDrawGesture.current = null
     setError('')
     try {
       const created = await api.createSeatingSection({
@@ -580,7 +589,6 @@ export default function SeatingPlanPage() {
       })
       setSections((current) => [...current, created])
       setDraft(NEW_SECTION)
-      setRouteDrawing(null)
       setSelectedSectionId(created.id)
       setSelectedTableId(null)
       setSelectedPathPoint(null)
@@ -597,8 +605,14 @@ export default function SeatingPlanPage() {
     event.stopPropagation()
     const point = pointOnPlan(event)
     if (!routeDrawing?.start) {
+      routeDrawGesture.current = {
+        pointerId: event.pointerId,
+        start: point,
+        dragged: false,
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
       setRouteDrawing({ start: point, preview: point })
-      showToast('Start placed. Click the route end point')
+      showToast('Start placed. Click the end point, or drag and release')
       return
     }
     void createDrawnRoute(routeDrawing.start, point)
@@ -606,7 +620,39 @@ export default function SeatingPlanPage() {
 
   function handleRouteDrawPointerMove(event: React.PointerEvent<SVGSVGElement>) {
     if (!routeDrawing?.start || creating) return
-    setRouteDrawing((current) => current ? { ...current, preview: pointOnPlan(event) } : current)
+    // React's `currentTarget` is only guaranteed while the event handler is
+    // running. Resolve the coordinates before entering the state updater,
+    // which React may invoke after the event has been released.
+    const preview = pointOnPlan(event)
+    const gesture = routeDrawGesture.current
+    if (gesture?.pointerId === event.pointerId && Math.hypot(
+      preview.x - gesture.start.x,
+      preview.y - gesture.start.y,
+    ) >= 8) {
+      gesture.dragged = true
+    }
+    setRouteDrawing((current) => current ? { ...current, preview } : current)
+  }
+
+  function handleRouteDrawPointerUp(event: React.PointerEvent<SVGSVGElement>) {
+    const gesture = routeDrawGesture.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    routeDrawGesture.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (!gesture.dragged) return
+
+    const end = pointOnPlan(event)
+    if (Math.hypot(end.x - gesture.start.x, end.y - gesture.start.y) >= 24) {
+      void createDrawnRoute(gesture.start, end)
+    }
+  }
+
+  function handleRouteDrawPointerCancel(event: React.PointerEvent<SVGSVGElement>) {
+    if (routeDrawGesture.current?.pointerId === event.pointerId) {
+      routeDrawGesture.current = null
+    }
   }
 
   async function updateSection(patch: Partial<SeatingSection>) {
@@ -988,8 +1034,29 @@ export default function SeatingPlanPage() {
     const svg = event.currentTarget.ownerSVGElement
     if (!svg) return
     let latest = routePoints(section)
+    let finished = false
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      window.removeEventListener('blur', finish)
+      api.updateSeatingSection(section.id, { path_points: latest }).catch(() => {
+        setError('Could not save the route. It may revert on reload.')
+        if (selectedEvent) loadPlan(selectedEvent.id)
+      })
+    }
 
     const move = (moveEvent: PointerEvent) => {
+      // If pointerup happened outside the browser, the next mouse movement
+      // still tells us that no button is held. Stop rather than leaving the
+      // route point attached to the cursor.
+      if (moveEvent.pointerType === 'mouse' && moveEvent.buttons === 0) {
+        finish()
+        return
+      }
       const bounds = svg.getBoundingClientRect()
       const point = {
         x: Math.round(clamp((moveEvent.clientX - bounds.left) / bounds.width, 1) * 10000) / 10000,
@@ -1000,16 +1067,10 @@ export default function SeatingPlanPage() {
         item.id === section.id ? { ...item, path_points: latest } : item
       )))
     }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      api.updateSeatingSection(section.id, { path_points: latest }).catch(() => {
-        setError('Could not save the route. It may revert on reload.')
-        if (selectedEvent) loadPlan(selectedEvent.id)
-      })
-    }
     window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+    window.addEventListener('blur', finish)
   }
 
   /** Drag a bend on a connector.
@@ -1042,8 +1103,26 @@ export default function SeatingPlanPage() {
     const scale = bounds.width / plan.width
     const size = sectionSize(route)
     let latest = points
+    let finished = false
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      window.removeEventListener('blur', finish)
+      api.updateSeatingSection(route.id, { path_points: latest }).catch(() => {
+        setError('Could not save the route. It may revert on reload.')
+        if (selectedEvent) loadPlan(selectedEvent.id)
+      })
+    }
 
     const move = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerType === 'mouse' && moveEvent.buttons === 0) {
+        finish()
+        return
+      }
       const planX = (moveEvent.clientX - bounds.left) / scale
       const planY = (moveEvent.clientY - bounds.top) / scale
       // Back into the route's own normalised space.
@@ -1056,16 +1135,10 @@ export default function SeatingPlanPage() {
         current.map((item) => (item.id === route.id ? { ...item, path_points: latest } : item)),
       )
     }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      api.updateSeatingSection(route.id, { path_points: latest }).catch(() => {
-        setError('Could not save the route. It may revert on reload.')
-        if (selectedEvent) loadPlan(selectedEvent.id)
-      })
-    }
     window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+    window.addEventListener('blur', finish)
   }
 
   /** Blocks this route may connect to: every other section, plus their tables. */
@@ -1636,6 +1709,8 @@ export default function SeatingPlanPage() {
                     aria-label={routeDrawing.start ? 'Choose the route end point' : 'Choose the route start point'}
                     onPointerDown={handleRouteDrawPointerDown}
                     onPointerMove={handleRouteDrawPointerMove}
+                    onPointerUp={handleRouteDrawPointerUp}
+                    onPointerCancel={handleRouteDrawPointerCancel}
                   >
                     {routeDrawing.start && routeDrawing.preview && (
                       <>
@@ -1667,7 +1742,7 @@ export default function SeatingPlanPage() {
                   </svg>
                   <div className="seating-route-draw-banner" role="status">
                     <strong>{routeDrawing.start ? 'Choose the end point' : 'Choose the start point'}</strong>
-                    <span>Click anywhere on the venue plan.</span>
+                    <span>{routeDrawing.start ? 'Click once, or release after dragging.' : 'Click, or drag from the start to the end.'}</span>
                     <button type="button" onClick={() => setRouteDrawing(null)}>Cancel</button>
                   </div>
                 </>

@@ -10,13 +10,14 @@ const label = 'block text-xs font-semibold uppercase tracking-[0.16em] mb-1.5'
 
 export default function ProfilePage() {
   useRequireAuth()
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, refreshUser } = useAuth()
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName]   = useState('')
   const [email, setEmail]         = useState('')
   const [password, setPassword]   = useState('')
   const [confirm, setConfirm]     = useState('')
+  const [currentPassword, setCurrentPassword] = useState('')
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
   const [success, setSuccess]     = useState('')
@@ -34,13 +35,20 @@ export default function ProfilePage() {
     setError(''); setSuccess('')
     if (password && password !== confirm) { setError('Passwords do not match.'); return }
     if (password && password.length < 8) { setError('Password must be at least 8 characters.'); return }
+    if (password && !currentPassword) { setError('Enter your current password before choosing a new one.'); return }
     setSaving(true)
     try {
-      const payload: Record<string, string> = { first_name: firstName, last_name: lastName, email }
-      if (password) payload.password = password
-      await api.updateUser(user!.id, payload)
-      setPassword(''); setConfirm('')
-      setSuccess('Profile updated successfully.')
+      await api.updateMe({ email, first_name: firstName, last_name: lastName })
+      if (password) {
+        await api.changePassword({
+          current_password: currentPassword,
+          new_password: password,
+          confirm_password: confirm,
+        })
+      }
+      await refreshUser()
+      setCurrentPassword(''); setPassword(''); setConfirm('')
+      setSuccess(password ? 'Profile and password updated successfully.' : 'Profile updated successfully.')
       setTimeout(() => setSuccess(''), 4000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save.')
@@ -105,18 +113,24 @@ export default function ProfilePage() {
 
         <div className="rounded-[12px] p-5 space-y-4" style={{ border: '1px solid var(--line)', background: 'var(--panel)' }}>
           <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted-2)' }}>Change password</p>
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>Leave blank to keep your current password.</p>
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>For your security, changing it requires your current password.</p>
+          <div>
+            <label className={label} style={{ color: 'var(--muted)' }}>Current password</label>
+            <input type="password" className={input} style={inputStyle} value={currentPassword}
+              autoComplete="current-password" placeholder="Required to change password"
+              onChange={(e) => setCurrentPassword(e.target.value)} />
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className={label} style={{ color: 'var(--muted)' }}>New password</label>
               <input type="password" className={input} style={inputStyle} value={password}
-                placeholder="Min 8 characters"
+                autoComplete="new-password" placeholder="Min 8 characters"
                 onChange={(e) => setPassword(e.target.value)} />
             </div>
             <div>
               <label className={label} style={{ color: 'var(--muted)' }}>Confirm password</label>
               <input type="password" className={input} style={inputStyle} value={confirm}
-                placeholder="Repeat new password"
+                autoComplete="new-password" placeholder="Repeat new password"
                 onChange={(e) => setConfirm(e.target.value)} />
             </div>
           </div>

@@ -17,3 +17,8 @@ class LoginRateThrottle(AuthRateThrottle):
 class SignupRateThrottle(AuthRateThrottle):
     scope = 'signup'
     rate = '5/hour'
+
+
+class PasswordResetRateThrottle(AuthRateThrottle):
+    scope = 'password_reset'
+    rate = '5/hour'

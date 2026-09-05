@@ -8,8 +8,22 @@ export const authApi = {
     request<AuthUser>('/auth/signup/', { method: 'POST', body: JSON.stringify(data) }),
   logout: () =>
     request<void>('/auth/logout/', { method: 'POST' }),
+  requestPasswordReset: (email: string) =>
+    request<{ detail: string }>('/auth/password/reset/', {
+      method: 'POST', body: JSON.stringify({ email }),
+    }),
+  confirmPasswordReset: (data: { uid: string; token: string; new_password: string; confirm_password: string }) =>
+    request<{ detail: string }>('/auth/password/reset/confirm/', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  changePassword: (data: { current_password: string; new_password: string; confirm_password: string }) =>
+    request<{ detail: string }>('/auth/password/change/', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   me: () =>
     request<AuthUser>('/auth/me/'),
+  updateMe: (data: { email: string; first_name: string; last_name: string }) =>
+    request<AuthUser>('/auth/me/', { method: 'PATCH', body: JSON.stringify(data) }),
   getOrganizations: () =>
     request<Organization[] | { results: Organization[] }>('/auth/organizations/').then((data) => Array.isArray(data) ? data : data.results),
   createOrganization: (data: { name: string; timezone: string }) =>

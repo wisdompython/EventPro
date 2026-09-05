@@ -1,5 +1,8 @@
-from django.contrib.auth import login, logout
+from django.contrib.auth import login, logout, update_session_auth_hash
+from django.contrib.auth.tokens import default_token_generator
 from django.db import transaction
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status
@@ -16,10 +19,15 @@ from .permissions import IsPlatformAdmin, IsSuperAdmin, IsAuthenticatedAnyRole
 from .serializers import (
     LoginSerializer, UserSerializer,
     SignupSerializer,
+    PasswordChangeSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
+    ProfileUpdateSerializer,
     CreateUserSerializer, UpdateUserSerializer,
     OrganizationSerializer,
 )
-from .throttles import LoginRateThrottle, SignupRateThrottle
+from .throttles import LoginRateThrottle, PasswordResetRateThrottle, SignupRateThrottle
+from .tasks import send_password_reset_email
 from .tenancy import (
     LEGACY_TO_MEMBERSHIP_ROLE,
     activate_organization,
@@ -27,7 +35,6 @@ from .tenancy import (
     get_request_organization,
     unique_organization_slug,
 )
-
 
 @ensure_csrf_cookie
 @api_view(['GET'])
@@ -85,10 +92,69 @@ def logout_view(request):
     return Response({'detail': 'Logged out.'})
 
 
-@api_view(['GET'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticatedAnyRole])
 def me_view(request):
+    if request.method == 'PATCH':
+        serializer = ProfileUpdateSerializer(
+            request.user, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
     return Response(UserSerializer(request.user, context={'request': request}).data)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([PasswordResetRateThrottle])
+def password_reset_request_view(request):
+    """Send a one-time reset link without revealing whether an email exists."""
+    SessionAuthentication().enforce_csrf(request)
+    serializer = PasswordResetRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    send_password_reset_email.delay(serializer.validated_data['email'])
+
+    return Response({
+        'detail': 'If an active account uses that email, a password reset link has been sent.',
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([PasswordResetRateThrottle])
+def password_reset_confirm_view(request):
+    SessionAuthentication().enforce_csrf(request)
+    serializer = PasswordResetConfirmSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    try:
+        user_id = force_str(urlsafe_base64_decode(serializer.validated_data['uid']))
+        user = User.objects.get(pk=user_id, is_active=True)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        user = None
+
+    if user is None or not default_token_generator.check_token(
+        user, serializer.validated_data['token'],
+    ):
+        return Response(
+            {'detail': 'This password reset link is invalid or has expired.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    serializer.validate_for_user(user)
+    user.set_password(serializer.validated_data['new_password'])
+    user.save(update_fields=['password'])
+    return Response({'detail': 'Your password has been reset. You can now sign in.'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticatedAnyRole])
+def password_change_view(request):
+    serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
+    serializer.is_valid(raise_exception=True)
+    request.user.set_password(serializer.validated_data['new_password'])
+    request.user.save(update_fields=['password'])
+    update_session_auth_hash(request, request.user)
+    return Response({'detail': 'Your password has been changed.'})
 
 
 class OrganizationViewSet(ModelViewSet):
@@ -177,6 +243,11 @@ class UserViewSet(ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+        if instance == request.user and request.data.get('password'):
+            return Response(
+                {'password': ['Use the change-password form and confirm your current password.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         update_ser = UpdateUserSerializer(instance, data=request.data, partial=partial)
         update_ser.is_valid(raise_exception=True)
         user = update_ser.save()

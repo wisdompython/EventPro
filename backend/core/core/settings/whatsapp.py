@@ -3,6 +3,7 @@ import os
 # ---------------------------------------------------------------------------
 # WhatsApp — Meta Cloud API via PyWA (populated via .env)
 # ---------------------------------------------------------------------------
+WHATSAPP_TRANSPORT     = os.environ.get('WHATSAPP_TRANSPORT', 'meta').strip().lower()
 WHATSAPP_PHONE_ID      = os.environ.get('WHATSAPP_PHONE_ID', '')
 WHATSAPP_TOKEN         = os.environ.get('WHATSAPP_TOKEN', '')
 WHATSAPP_APP_ID        = os.environ.get('WHATSAPP_APP_ID', '')

@@ -69,7 +69,10 @@ function LoginForm() {
           </label>
 
           <label>
-            <span>Password</span>
+            <span className="auth-field-heading">
+              <span>Password</span>
+              <Link href="/forgot-password">Forgot password?</Link>
+            </span>
             <div className="auth-password-field">
               <input
                 type={showPassword ? 'text' : 'password'}

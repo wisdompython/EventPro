@@ -8,6 +8,9 @@ from .views import (
     signup_view,
     logout_view,
     me_view,
+    password_change_view,
+    password_reset_confirm_view,
+    password_reset_request_view,
 )
 
 router = DefaultRouter()
@@ -20,5 +23,8 @@ urlpatterns = [
     path('signup/', signup_view),
     path('logout/', logout_view),
     path('me/',     me_view),
+    path('password/change/', password_change_view),
+    path('password/reset/', password_reset_request_view),
+    path('password/reset/confirm/', password_reset_confirm_view),
     path('', include(router.urls)),
 ]

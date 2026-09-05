@@ -43,7 +43,12 @@ def send_pass(guest) -> bool:
     Send the guest's branded pass via WhatsApp using the approved template.
     Returns True on success, False on failure (logs the error).
     """
-    if not settings.WHATSAPP_PHONE_ID or not settings.WHATSAPP_TOKEN:
+    transport = getattr(settings, 'WHATSAPP_TRANSPORT', 'meta')
+    if transport not in {'meta', 'log'}:
+        logger.error('Unknown WhatsApp transport: %s', transport)
+        return False
+
+    if transport == 'meta' and (not settings.WHATSAPP_PHONE_ID or not settings.WHATSAPP_TOKEN):
         logger.warning("WhatsApp not configured — skipping send for guest %s", guest.id)
         return False
 
@@ -65,6 +70,14 @@ def send_pass(guest) -> bool:
             event.name, guest.id,
         )
         return False
+
+    if transport == 'log':
+        logger.info(
+            '[WhatsApp sandbox] pass to=%s guest=%s event=%s preferences_url=%s',
+            _normalise_phone(guest.phone_number), guest.id,
+            event.name if event else '', build_preferences_url(guest),
+        )
+        return True
 
     try:
         from pywa.types.templates import HeaderImage, BodyText, TemplateLanguage
@@ -154,12 +167,23 @@ def _format_ordinal_date(value) -> str:
 
 def send_reminder(guest, template_name: str) -> bool:
     """Send a reminder WhatsApp template message to a guest."""
-    if not settings.WHATSAPP_PHONE_ID or not settings.WHATSAPP_TOKEN:
+    transport = getattr(settings, 'WHATSAPP_TRANSPORT', 'meta')
+    if transport not in {'meta', 'log'}:
+        logger.error('Unknown WhatsApp transport: %s', transport)
+        return False
+    if transport == 'meta' and (not settings.WHATSAPP_PHONE_ID or not settings.WHATSAPP_TOKEN):
         logger.warning("WhatsApp not configured — skipping reminder for guest %s", guest.id)
         return False
 
     if not guest.phone_number:
         return False
+
+    if transport == 'log':
+        logger.info(
+            '[WhatsApp sandbox] reminder to=%s guest=%s template=%s',
+            _normalise_phone(guest.phone_number), guest.id, template_name,
+        )
+        return True
 
     try:
         from pywa.types.templates import BodyText, HeaderImage, TemplateLanguage
@@ -225,13 +249,24 @@ def send_message(phone_number: str, message: str) -> bool:
     has messaged the business number first.
     Returns True on success, False on failure.
     """
-    if not settings.WHATSAPP_PHONE_ID or not settings.WHATSAPP_TOKEN:
+    transport = getattr(settings, 'WHATSAPP_TRANSPORT', 'meta')
+    if transport not in {'meta', 'log'}:
+        logger.error('Unknown WhatsApp transport: %s', transport)
+        return False
+    if transport == 'meta' and (not settings.WHATSAPP_PHONE_ID or not settings.WHATSAPP_TOKEN):
         logger.warning("WhatsApp not configured — skipping free-form send")
         return False
 
     if not phone_number or not message.strip():
         logger.warning("send_message: missing phone or message")
         return False
+
+    if transport == 'log':
+        logger.info(
+            '[WhatsApp sandbox] message to=%s text=%s',
+            _normalise_phone(phone_number), message,
+        )
+        return True
 
     try:
         phone = _normalise_phone(phone_number)
