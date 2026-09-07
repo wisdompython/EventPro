@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.db.models import Count, Q
 
-from ..models import Event, Guest
+from ..models import Event, Guest, SeatingTable
 from ..serializers import CheckInGuestSerializer, GuestSerializer, GuestListSerializer
 from ..tasks import generate_guest_assets, send_whatsapp_pass, bulk_send_whatsapp_passes
 from accounts.permissions import (
@@ -73,6 +73,16 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
             qs = qs.filter(status=s)
         if t := params.get('ticket_type'):
             qs = qs.filter(ticket_type=t)
+        if table_number := params.get('table_number'):
+            if table_number == '__unassigned__':
+                qs = qs.filter(table_number='')
+            else:
+                qs = qs.filter(table_number=table_number)
+        if seating_area := params.get('seating_area'):
+            table_labels = SeatingTable.objects.filter(
+                event_id=params.get('event'), section__name=seating_area,
+            ).values_list('label', flat=True)
+            qs = qs.filter(table_number__in=table_labels)
         wa_sent = params.get('wa_sent')
         if wa_sent == 'true':
             qs = qs.filter(whatsapp_sent=True)

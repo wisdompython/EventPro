@@ -7,6 +7,8 @@ import { watDateTimeInputToIso } from '@/lib/datetime'
 import type { TicketTypeDef } from '@/components/EventConfigPanel'
 import { EventDetailsForm } from '@/components/events/EventDetailsForm'
 import { GuestConfigSection } from '@/components/events/GuestConfigSection'
+import { NewEventRequirementBuilder, RequirementSetupDraft } from '@/components/events/NewEventRequirementBuilder'
+import { SeatingSetupSection, SeatingAreaDraft } from '@/components/events/SeatingSetupSection'
 import { FormSectionHeader } from '@/components/ui/FormSectionHeader'
 import { DateTimePicker } from '@/components/ui/DateTimePicker'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
@@ -43,7 +45,7 @@ const RESPONSE_OPTIONS: Array<{ value: ResponsePlan; title: string; description:
   },
 ]
 
-const STEP_LABELS = ['Response plan', 'Event details', 'Guest setup', 'Delivery', 'Review']
+const STEP_LABELS = ['Response plan', 'Event details', 'Guest setup', 'Seating', 'Delivery', 'Review']
 
 export default function AddEventPage() {
   const router = useRouter()
@@ -68,6 +70,10 @@ export default function AddEventPage() {
   const [dateValid, setDateValid] = useState(false)
   const [passTiming, setPassTiming] = useState<'immediate' | 'scheduled'>('immediate')
   const [passSendAt, setPassSendAt] = useState('')
+  const [preferencesDeadline, setPreferencesDeadline] = useState('')
+  const [requirementsSetup, setRequirementsSetup] = useState<RequirementSetupDraft[]>([])
+  const [seatingEnabled, setSeatingEnabled] = useState(false)
+  const [seatingAreas, setSeatingAreas] = useState<SeatingAreaDraft[]>([])
 
   useEffect(() => {
     api.getWhatsAppTemplates().then(setWaTemplates).catch(console.error)
@@ -110,12 +116,27 @@ export default function AddEventPage() {
       if (!dateValid) setError('Please set a future date and time for the event.')
       return
     }
-    if (step === 4 && responsePlan !== 'rsvp' && whatsappEnabled && passTiming === 'scheduled' && !passSendAt) {
+    if (step === 4 && seatingEnabled && (seatingAreas.length === 0 || !validateStage(4))) {
+      if (seatingAreas.length === 0) setError('Add at least one seating area, or choose Configure later.')
+      return
+    }
+    if (step === 3 && responsePlan === 'preferences' && !preferencesDeadline) {
+      setError('Set a deadline for standalone preference submissions.')
+      return
+    }
+    if (step === 3 && responsePlan === 'preferences' && formRef.current) {
+      const eventDate = fieldValue(formRef.current, 'date')
+      if (eventDate && preferencesDeadline >= eventDate) {
+        setError('The preferences deadline must be before the event date and time.')
+        return
+      }
+    }
+    if (step === 5 && responsePlan !== 'rsvp' && whatsappEnabled && passTiming === 'scheduled' && !passSendAt) {
       setError('Choose a date and time for scheduled guest-pass delivery.')
       return
     }
-    if (step === 4) setReviewConfirmed(false)
-    setStep((current) => Math.min(5, current + 1))
+    if (step === 5) setReviewConfirmed(false)
+    setStep((current) => Math.min(6, current + 1))
   }
 
   function fieldValue(form: HTMLFormElement, name: string, fallback = '') {
@@ -123,7 +144,7 @@ export default function AddEventPage() {
   }
 
   async function createEvent() {
-    if (step !== 5 || !reviewConfirmed || !responsePlan || !formRef.current) return
+    if (step !== 6 || !reviewConfirmed || !responsePlan || !formRef.current) return
     if (!dateValid || !validateStage(2)) {
       setError('Review the required event details before creating this event.')
       setStep(2)
@@ -159,10 +180,13 @@ export default function AddEventPage() {
     fd.append('collect_aso_ebi', String(responsePlan !== 'none' && collectAsoEbi))
     fd.append('allow_plus_one', String(responsePlan !== 'none' && allowPlusOne))
     fd.append('preferences_enabled', String(usesPreferences))
+    fd.append('preferences_deadline', usesPreferences ? watDateTimeInputToIso(preferencesDeadline) : '')
     fd.append('collect_celebrant', String(responsePlan !== 'none' && collectCelebrant))
     fd.append('celebrant_options', JSON.stringify(responsePlan !== 'none' ? celebrantOptions : []))
     if (whatsappTemplate) fd.append('whatsapp_template', String(whatsappTemplate))
     fd.append('create_rsvp_workflow', String(usesRsvp))
+    fd.append('seating_setup', JSON.stringify(seatingEnabled ? seatingAreas.map(({ id: _id, ...area }) => area) : []))
+    fd.append('requirements_setup', JSON.stringify(responsePlan !== 'none' ? requirementsSetup.map(({ client_id: _clientId, ...question }) => question) : []))
     if (!usesRsvp && whatsappEnabled && passTiming === 'scheduled' && passSendAt) {
       fd.append('pass_send_at', new Date(passSendAt).toISOString())
     }
@@ -193,13 +217,19 @@ export default function AddEventPage() {
       : passTiming === 'scheduled' && passSendAt
         ? `Passes scheduled for ${new Date(passSendAt).toLocaleString('en-GB')}`
         : 'Passes sent when guests are added'
+  const seatingLabel = seatingEnabled
+    ? `${seatingAreas.length} areas · ${seatingAreas.reduce((total, area) => total + area.table_count, 0)} tables · ${seatingAreas.reduce((total, area) => total + area.table_count * area.seats_per_table, 0)} seats`
+    : 'Configure later in Event planner'
+  const preferencesDeadlineLabel = responsePlan === 'preferences' && preferencesDeadline
+    ? new Date(preferencesDeadline).toLocaleString('en-GB')
+    : 'Not applicable'
 
   return (
     <div className="admin-page admin-page--editor">
       <AdminPageHeader eyebrow="Event builder" title="Create an event" description="Decide what guests need to confirm first, then configure only the pages and delivery settings that apply." />
       <div className="admin-editor-grid">
         <div className="admin-editor-main">
-          <div className="mb-4 grid gap-2 rounded-2xl border border-[var(--line)] bg-white p-2 sm:grid-cols-5">
+          <div className="mb-4 grid gap-2 rounded-2xl border border-[var(--line)] bg-white p-2 sm:grid-cols-3 xl:grid-cols-6">
             {STEP_LABELS.map((label, index) => {
               const number = index + 1
               return <button type="button" key={label} disabled={number > step} onClick={() => number <= step && setStep(number)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition disabled:cursor-default ${number === step ? 'border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--ink)]' : 'border-[var(--line)] bg-[var(--panel)] text-[var(--muted)]'}`}><span className="font-semibold text-[var(--brand)]">{number}</span><span>{label}</span>{number < step && <span className="ml-auto text-emerald-700">✓</span>}</button>
@@ -239,20 +269,29 @@ export default function AddEventPage() {
                 if (nextCelebrants !== undefined) setCelebrantOptions(nextCelebrants)
                 if (nextTemplate !== undefined) setWhatsappTemplate(nextTemplate)
               }}/>
+              {responsePlan === 'preferences' && <div className="form-card mt-4"><FormSectionHeader title="Preferences deadline" description="The standalone form closes automatically at this date and time." /><div className="p-5 sm:p-6"><label className="form-label" htmlFor="new-preferences-deadline">Last time guests can submit</label><div className="mt-2"><DateTimePicker id="new-preferences-deadline" value={preferencesDeadline} onChange={setPreferencesDeadline} required /></div><p className="form-hint">Choose a time before the event, leaving enough time to send final totals to caterers and vendors.</p></div></div>}
+              {responsePlan !== 'none' && <NewEventRequirementBuilder channel={responsePlan === 'rsvp' ? 'rsvp' : 'preferences'} questions={requirementsSetup} onChange={setRequirementsSetup} />}
             </div>
 
             <div data-flow-stage="4" className={`form-flow__stage ${step === 4 ? 'is-active' : ''}`}>
-              {responsePlan === 'rsvp' ? <div className="form-card"><FormSectionHeader step={4} title="RSVP delivery" description="Attendance confirmation is enabled and WhatsApp delivery is required." /><div className="p-6"><div className="rounded-xl border border-[var(--line)] bg-[var(--bg)] p-4"><p className="text-sm font-semibold text-[var(--ink)]">Next: configure the RSVP invitation</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">After you review and create this event, you will choose the invitation template, send time, response deadline and confirmed-pass timing. Nothing is sent automatically.</p></div></div></div> : whatsappEnabled ? <div className="form-card"><FormSectionHeader step={4} title="Pass delivery" description={responsePlan === 'preferences' ? 'Guest choices are collected separately; passes do not wait for an attendance response.' : 'Choose when registered guests should receive their passes.'} /><div className="p-6"><label className="form-label" htmlFor="pass-timing">When should passes be sent?</label><select id="pass-timing" value={passTiming} onChange={(event) => setPassTiming(event.target.value as 'immediate' | 'scheduled')} className="form-control mt-2"><option value="immediate">Send when each guest is added</option><option value="scheduled">Schedule for later</option></select>{passTiming === 'scheduled' && <div className="mt-4"><label className="form-label" htmlFor="pass-send-at">Delivery date and time</label><div className="mt-2"><DateTimePicker id="pass-send-at" value={passSendAt} onChange={setPassSendAt} required /></div></div>}<p className="form-hint">You can change this later from the event workspace.</p></div></div> : <div className="form-card"><FormSectionHeader step={4} title="Delivery is off" description="WhatsApp delivery is disabled. The event will be created without sending messages or passes." /><div className="p-6 text-sm text-[var(--muted)]">You can enable delivery later from the event workspace.</div></div>}
+              <SeatingSetupSection step={4} enabled={seatingEnabled} areas={seatingAreas} onEnabledChange={setSeatingEnabled} onAreasChange={setSeatingAreas} />
             </div>
 
             <div data-flow-stage="5" className={`form-flow__stage ${step === 5 ? 'is-active' : ''}`}>
+              {responsePlan === 'rsvp' ? <div className="form-card"><FormSectionHeader step={5} title="RSVP delivery" description="Attendance confirmation is enabled and WhatsApp delivery is required." /><div className="p-6"><div className="rounded-xl border border-[var(--line)] bg-[var(--bg)] p-4"><p className="text-sm font-semibold text-[var(--ink)]">Next: configure the RSVP invitation</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">After you review and create this event, you will choose the invitation template, send time, response deadline and confirmed-pass timing. Nothing is sent automatically.</p></div></div></div> : whatsappEnabled ? <div className="form-card"><FormSectionHeader step={5} title="Pass delivery" description={responsePlan === 'preferences' ? 'Guest choices are collected separately; passes do not wait for an attendance response.' : 'Choose when registered guests should receive their passes.'} /><div className="p-6"><label className="form-label" htmlFor="pass-timing">When should passes be sent?</label><select id="pass-timing" value={passTiming} onChange={(event) => setPassTiming(event.target.value as 'immediate' | 'scheduled')} className="form-control mt-2"><option value="immediate">Send when each guest is added</option><option value="scheduled">Schedule for later</option></select>{passTiming === 'scheduled' && <div className="mt-4"><label className="form-label" htmlFor="pass-send-at">Delivery date and time</label><div className="mt-2"><DateTimePicker id="pass-send-at" value={passSendAt} onChange={setPassSendAt} required /></div></div>}<p className="form-hint">You can change this later from the event workspace.</p></div></div> : <div className="form-card"><FormSectionHeader step={5} title="Delivery is off" description="WhatsApp delivery is disabled. The event will be created without sending messages or passes." /><div className="p-6 text-sm text-[var(--muted)]">You can enable delivery later from the event workspace.</div></div>}
+            </div>
+
+            <div data-flow-stage="6" className={`form-flow__stage ${step === 6 ? 'is-active' : ''}`}>
               <div className="form-card">
-                <FormSectionHeader step={5} title="Review before creating" description="Reaching this card does not create anything. Confirm the plan below when you are ready." />
+                <FormSectionHeader step={6} title="Review before creating" description="Reaching this card does not create anything. Confirm the plan below when you are ready." />
                 <div className="p-5 sm:p-6">
                   <div className="divide-y divide-[var(--line)] rounded-xl border border-[var(--line)] bg-[var(--bg)] px-4">
                     {[
                       ['Guest response', responsePlanLabel],
                       ['Guest choices', responsePlan === 'none' ? 'Not collected' : enabledChoices.join(', ') || 'No additional choices enabled'],
+                      ['Custom questions', responsePlan === 'none' ? 'Not collected' : `${requirementsSetup.length} configured`],
+                      ['Preferences deadline', preferencesDeadlineLabel],
+                      ['Seating', seatingLabel],
                       ['WhatsApp', whatsappEnabled ? responsePlan === 'rsvp' ? 'On and required for RSVP' : 'On' : 'Off'],
                       ['Delivery', deliveryLabel],
                       ['After creation', responsePlan === 'rsvp' ? 'Open RSVP management to finish invitation timing' : 'Open the event workspace'],
@@ -265,7 +304,7 @@ export default function AddEventPage() {
 
             <div className="sticky bottom-0 z-10 -mx-2 flex gap-3 border-t border-[var(--line)] bg-[var(--bg)]/95 px-2 py-4 backdrop-blur">
               <button type="button" onClick={() => step === 1 ? router.push('/admin/event-management') : setStep((current) => current - 1)} className="flex-1 rounded-full border border-[var(--line)] py-2.5 text-sm font-semibold text-[var(--ink)] transition hover:border-[var(--ink)]">{step === 1 ? 'Cancel' : 'Back'}</button>
-              {step < 5 ? <button type="button" onClick={continueSetup} className="flex-1 rounded-full bg-[var(--brand)] py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--brand-strong)]">Continue</button> : <button data-tour="event-submit-button" type="button" onClick={createEvent} disabled={submitting || !reviewConfirmed} className="flex-1 rounded-full bg-[var(--brand)] py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--brand-strong)] disabled:cursor-not-allowed disabled:opacity-50">{submitting ? 'Creating…' : responsePlan === 'rsvp' ? 'Create event and continue to RSVP' : 'Create event'}</button>}
+              {step < 6 ? <button type="button" onClick={continueSetup} className="flex-1 rounded-full bg-[var(--brand)] py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--brand-strong)]">Continue</button> : <button data-tour="event-submit-button" type="button" onClick={createEvent} disabled={submitting || !reviewConfirmed} className="flex-1 rounded-full bg-[var(--brand)] py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--brand-strong)] disabled:cursor-not-allowed disabled:opacity-50">{submitting ? 'Creating…' : responsePlan === 'rsvp' ? 'Create event and continue to RSVP' : 'Create event'}</button>}
             </div>
           </form>
         </div>

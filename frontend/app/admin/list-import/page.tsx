@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { api, Event } from '@/lib/api'
+import { api, Event, SeatingSection } from '@/lib/api'
 import { UploadForm } from '@/components/bulk-upload/UploadForm'
 import { UploadResults } from '@/components/bulk-upload/UploadResults'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
@@ -44,6 +44,7 @@ export default function BulkUploadPage() {
   const [result, setResult]           = useState<UploadResult | null>(null)
   const [error, setError]             = useState('')
   const [replaceExisting, setReplaceExisting] = useState(false)
+  const [seatingSections, setSeatingSections] = useState<SeatingSection[]>([])
 
   useEffect(() => {
     api.getEvents().then((items) => {
@@ -54,6 +55,15 @@ export default function BulkUploadPage() {
       setReplaceExisting(params.get('replace') === '1')
     }).catch(console.error)
   }, [])
+
+  useEffect(() => {
+    setSeatingSections([])
+    if (selectedEvent) {
+      api.getSeatingSections(selectedEvent.id)
+        .then((items) => setSeatingSections(items.filter((item) => item.kind === 'tables')))
+        .catch(() => setSeatingSections([]))
+    }
+  }, [selectedEvent?.id])
 
   useEffect(() => {
     if (!result || result.status === 'done' || result.status === 'failed') return
@@ -75,11 +85,12 @@ export default function BulkUploadPage() {
   }, [result?.upload_id, result?.status])
 
   function handleEventChange(id: string) {
-    setSelectedEvent(events.find((e) => String(e.id) === id) ?? null)
+    const event = events.find((e) => String(e.id) === id) ?? null
+    setSelectedEvent(event)
   }
 
   const requiredCols = eventRequiredCols(selectedEvent)
-  const optionalCols = ['email', 'ticket_type', 'table_number', 'seat_number',
+  const optionalCols = ['email', 'ticket_type', 'seating_area', 'table_number', 'seat_number',
     ...(selectedEvent?.collect_aso_ebi ? ['aso_ebi_requested', 'aso_ebi_yards'] : []),
     ...(selectedEvent?.allow_plus_one ? ['plus_one_attending', 'plus_one_full_name', 'plus_one_phone_number'] : []),
   ].filter(
@@ -134,6 +145,7 @@ export default function BulkUploadPage() {
       <UploadForm
         events={events} selectedEvent={selectedEvent} submitting={submitting || result?.status === 'pending' || result?.status === 'processing'}
         requiredCols={requiredCols} optionalCols={optionalCols} ticketTypes={ticketTypes}
+        seatingSections={seatingSections}
         replaceExisting={replaceExisting} onReplaceExistingChange={setReplaceExisting}
         onSubmit={handleSubmit} onEventChange={handleEventChange}
       />

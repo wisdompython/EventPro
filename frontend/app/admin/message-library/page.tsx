@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { api, WhatsAppTemplate, TemplateCategory } from '@/lib/api'
 import { useRequireAuth } from '@/lib/auth'
 import { FormSectionHeader } from '@/components/ui/FormSectionHeader'
+import './message-library.css'
 
 const PAGE_SIZE = 20
 
@@ -53,39 +54,38 @@ function countPlaceholders(bodyText: string): number {
 function PreviewBubble({ bodyText, bodyParams, hasHeaderImage }: {
   bodyText: string; bodyParams: string[]; hasHeaderImage: boolean
 }) {
-  if (!bodyText.trim()) return null
   const preview = resolvePreview(bodyText, bodyParams)
   const placeholderCount = countPlaceholders(bodyText)
-  const mismatch = placeholderCount !== bodyParams.length
+  const mismatch = Boolean(bodyText.trim()) && placeholderCount !== bodyParams.length
 
   return (
-    <div className="mt-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] mb-2" style={{ color: 'var(--muted)' }}>Preview</p>
-      {mismatch && (
-        <p className="mb-2 text-xs rounded-lg px-3 py-2"
-          style={{ background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
-          ⚠ Body has {placeholderCount} placeholder{placeholderCount !== 1 ? 's' : ''} but {bodyParams.length} parameter{bodyParams.length !== 1 ? 's' : ''} defined — these must match.
-        </p>
-      )}
-      <div className="inline-block max-w-sm rounded-[16px] rounded-tl-[4px] px-4 py-3 text-sm leading-relaxed"
-        style={{ background: 'var(--chip)', border: '1px solid var(--line)', color: 'var(--ink)' }}>
+    <div className="message-preview-phone">
+      <div className="message-preview-phone__bar">
+        <span>EP</span>
+        <div><strong>Event Pro</strong><small>Business account</small></div>
+        <i>•••</i>
+      </div>
+      <div className="message-preview-phone__chat">
+        <div className={`message-preview-bubble${!bodyText.trim() ? ' is-empty' : ''}`}>
         {hasHeaderImage && (
-          <div className="mb-2 flex items-center gap-1.5 rounded-[8px] px-3 py-2 text-xs"
-            style={{ background: 'var(--chip)', color: 'var(--muted)' }}>
-            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
-              <polyline points="21 15 16 10 5 21"/>
+          <div className="message-preview-media">
+            <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 24 24">
+              <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m5 18 5-5 3 3 2-2 4 4"/>
             </svg>
-            Guest pass image
+            <span>Personalised guest artwork</span>
           </div>
         )}
-        <p style={{ whiteSpace: 'pre-wrap' }}>{preview}</p>
+          <p>{preview || 'Your approved WhatsApp message will appear here as you type.'}</p>
+          <time>11:15 <span>✓✓</span></time>
+        </div>
       </div>
-      {bodyParams.length > 0 && !mismatch && (
-        <p className="mt-1.5 text-[11px]" style={{ color: 'var(--muted-2)' }}>
-          Showing example values — actual messages use real guest data.
-        </p>
-      )}
+      <div className={`message-preview-note${mismatch ? ' has-error' : ''}`}>
+        {mismatch
+          ? `Message has ${placeholderCount} placeholder${placeholderCount === 1 ? '' : 's'}, but ${bodyParams.length} variable${bodyParams.length === 1 ? '' : 's'} mapped.`
+          : bodyParams.length
+            ? 'Example data shown. Each guest receives their real details.'
+            : 'Add numbered placeholders to personalise this message.'}
+      </div>
     </div>
   )
 }
@@ -139,24 +139,26 @@ function TemplateForm({
   const mismatch = Boolean(form.body_text.trim()) && placeholderCount !== form.body_params.length
 
   return (
-    <form onSubmit={onSubmit} className="space-y-5 pb-2">
+    <form onSubmit={onSubmit} className="message-template-form">
+      <div className="message-template-form__fields">
       {error && (
-        <p className="rounded-lg px-3 py-2 text-xs" style={{ background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+        <p className="message-template-form__error">
           {error}
         </p>
       )}
 
       {isNew && (
-        <div className="flex flex-col gap-3 rounded-xl border border-[var(--brand)]/30 bg-[var(--brand-soft)] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="message-rsvp-starter">
           <div>
-            <p className="text-sm font-semibold text-[var(--ink)]">Creating an RSVP invitation?</p>
-            <p className="mt-1 text-xs leading-5 text-[var(--muted)]">Start with recommended copy and variable order, then match it to the approved Meta template.</p>
+            <span>Quick start</span>
+            <p>Creating an RSVP invitation?</p>
+            <small>Load recommended copy and variable order, then match it to your approved Meta template.</small>
           </div>
-          <button type="button" onClick={useRsvpStarter} className="shrink-0 rounded-full border border-[var(--brand)] px-4 py-2 text-xs font-semibold text-[var(--brand)]">Use RSVP starter</button>
+          <button type="button" onClick={useRsvpStarter}>Use RSVP starter <i>→</i></button>
         </div>
       )}
 
-      <section className="form-card">
+      <section className="form-card message-form-section message-form-section--identity">
       <FormSectionHeader step={1} title="Template identity" description="Use the exact Meta name, plus a friendly name your team will recognise." />
 
       <div className="p-5">
@@ -202,7 +204,7 @@ function TemplateForm({
       </div>
       </section>
 
-      <section className="form-card">
+      <section className="form-card message-form-section message-form-section--body">
         <FormSectionHeader step={2} title="Approved message" description="Paste the body exactly as approved by Meta. Number variables in the order they appear." />
         <div className="p-5">
         <label className="form-label">
@@ -221,57 +223,52 @@ function TemplateForm({
         </div>
       </section>
 
-      <section className="form-card">
+      <section className="form-card message-form-section message-form-section--media">
       <FormSectionHeader step={3} title="Delivery media" description="RSVP invitations are normally text-only. Pass messages can include the generated pass image." />
-      <div className="m-5 flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--bg)] p-4">
+      <div className={`message-media-choice${form.has_header_image ? ' is-selected' : ''}`}>
         <button type="button"
           onClick={() => setForm((f) => ({ ...f, has_header_image: !f.has_header_image }))}
-          className="relative w-9 h-5 rounded-full transition-colors flex-shrink-0"
-          style={{ background: form.has_header_image ? 'var(--brand)' : 'rgba(23,26,33,0.18)' }}>
-          <span className="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform"
-            style={{ left: form.has_header_image ? '18px' : '2px' }} />
+          className="message-media-toggle"
+          aria-pressed={form.has_header_image}>
+          <span />
         </button>
         <div>
-          <p className="text-xs font-semibold" style={{ color: 'var(--ink)' }}>Header image</p>
-          <p className="text-[11px]" style={{ color: 'var(--muted)' }}>Template has an image header — guest pass will be sent</p>
+          <p>{form.has_header_image ? 'Image header enabled' : 'Text-only template'}</p>
+          <small>{form.has_header_image ? 'The personalised guest pass or RSVP artwork will be attached.' : 'Enable this only when the approved Meta template has an image header.'}</small>
         </div>
       </div>
       </section>
+      </div>
 
-      <section className="form-card">
+      <section className="form-card message-form-section message-form-section--variables">
         <FormSectionHeader step={4} title="Map placeholders" description="Add one value for every numbered placeholder. The same value can be mapped more than once." />
-        <div className="m-5">
+        <div className="message-variable-mapper">
         {form.body_params.length === 0 && (
-          <p className="text-xs mb-2" style={{ color: 'var(--muted-2)' }}>No parameters yet.</p>
+          <div className="message-variable-empty"><strong>No variables mapped</strong><span>Add a guest or event field for every numbered placeholder in the message.</span></div>
         )}
         {form.body_params.map((key, i) => (
-          <div key={i} className="flex items-center gap-2 mb-2">
-            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[10px] font-bold text-white"
-              style={{ background: 'var(--brand)' }}>{i + 1}</span>
-            <span className="flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold"
-              style={{ background: 'var(--chip)', color: 'var(--ink)', border: '1px solid var(--line)' }}>
-              {varLabel(key)}
-              <span className="ml-1.5 font-normal font-mono" style={{ color: 'var(--muted)' }}>({key})</span>
+          <div key={i} className="message-variable-row">
+            <span className="message-variable-row__number">{`{{${i + 1}}}`}</span>
+            <span className="message-variable-row__value">
+              <strong>{varLabel(key)}</strong>
+              <code>{key}</code>
             </span>
-            <button type="button" onClick={() => moveParam(i, -1)} disabled={i === 0}
-              className="px-1.5 py-1 text-xs disabled:opacity-30" style={{ color: 'var(--muted)' }}>↑</button>
-            <button type="button" onClick={() => moveParam(i, 1)} disabled={i === form.body_params.length - 1}
-              className="px-1.5 py-1 text-xs disabled:opacity-30" style={{ color: 'var(--muted)' }}>↓</button>
-            <button type="button" onClick={() => removeParam(i)}
-              className="px-2 py-1 text-xs rounded-full" style={{ color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.3)' }}>✕</button>
+            <span className="message-variable-row__actions">
+              <button type="button" onClick={() => moveParam(i, -1)} disabled={i === 0} aria-label={`Move ${varLabel(key)} up`}>↑</button>
+              <button type="button" onClick={() => moveParam(i, 1)} disabled={i === form.body_params.length - 1} aria-label={`Move ${varLabel(key)} down`}>↓</button>
+              <button type="button" onClick={() => removeParam(i)} aria-label={`Remove ${varLabel(key)}`}>×</button>
+            </span>
           </div>
         ))}
         {availableVars.length > 0 && (
-          <div className="mt-3">
-            <p className="text-[11px] mb-2" style={{ color: 'var(--muted-2)' }}>
-              Add value — select it again whenever another placeholder needs the same data:
-            </p>
-            <div className="flex flex-wrap gap-2">
+          <div className="message-variable-options">
+            <p>Add a guest or event field</p>
+            <small>You can select a field more than once.</small>
+            <div>
               {availableVars.map((v) => (
                 <button key={v.key} type="button" onClick={() => addParam(v.key)}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-full transition"
-                  style={{ background: 'var(--panel-2)', border: '1px solid var(--line)', color: 'var(--ink)' }}>
-                  + {v.label}{usageCount(v.key) > 0 ? ` (${usageCount(v.key)}× used)` : ''}
+                  className={usageCount(v.key) > 0 ? 'is-used' : ''}>
+                  <span>＋</span>{v.label}{usageCount(v.key) > 0 ? <i>{usageCount(v.key)}×</i> : null}
                 </button>
               ))}
             </div>
@@ -279,20 +276,21 @@ function TemplateForm({
         )}
         </div>
 
-      <div className="mx-5 mb-5"><PreviewBubble bodyText={form.body_text} bodyParams={form.body_params} hasHeaderImage={form.has_header_image} /></div>
+      <div className="message-form-preview">
+        <div className="message-form-preview__heading"><span>Live preview</span><small>Example guest data</small></div>
+        <PreviewBubble bodyText={form.body_text} bodyParams={form.body_params} hasHeaderImage={form.has_header_image} />
+      </div>
       </section>
 
-      <div className="sticky bottom-0 z-10 -mx-2 flex gap-3 border-t border-[var(--line)] bg-[var(--panel)]/95 px-2 py-4 backdrop-blur">
+      <div className="message-template-form__actions">
         <button type="submit" disabled={submitting || !!mismatch}
-          className="rounded-full px-5 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
-          style={{ background: 'var(--brand)' }}>
+          className="message-template-form__submit">
           {submitting ? 'Saving…' : submitLabel}
         </button>
-        <button type="button" onClick={onCancel}
-          className="rounded-full px-5 py-2 text-xs font-semibold transition"
-          style={{ border: '1px solid var(--line)', color: 'var(--muted)' }}>
+        <button type="button" onClick={onCancel} className="message-template-form__cancel">
           Cancel
         </button>
+        <span>{mismatch ? 'Map every placeholder before saving.' : form.name && form.body_text ? 'Ready to save' : 'Complete the required fields to continue.'}</span>
       </div>
     </form>
   )
@@ -304,6 +302,8 @@ export default function TemplatesPage() {
   const [count, setCount] = useState(0)
   const [page, setPage] = useState(1)
   const [categoryFilter, setCategoryFilter] = useState<string>('')
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [categories, setCategories] = useState<TemplateCategory[]>([])
   const [availableVars, setAvailableVars] = useState<{ key: string; label: string }[]>([])
   const [loading, setLoading] = useState(true)
@@ -320,17 +320,23 @@ export default function TemplatesPage() {
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE))
   const selectedTemplate = templates.find((t) => t.id === selectedId)
 
-  useEffect(() => { setPage(1) }, [categoryFilter])
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => { setPage(1) }, [categoryFilter, debouncedSearch])
 
   useEffect(() => {
     setLoading(true)
     const params: Record<string, string> = { page: String(page), page_size: String(PAGE_SIZE) }
     if (categoryFilter) params.category = categoryFilter
+    if (debouncedSearch) params.search = debouncedSearch
     api.getWhatsAppTemplatesPaged(params)
       .then((d) => { setTemplates(d.results); setCount(d.count) })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [page, categoryFilter])
+  }, [page, categoryFilter, debouncedSearch])
 
   useEffect(() => {
     Promise.all([api.getTemplateCategories(), api.getAvailableTemplateVars()])
@@ -340,10 +346,18 @@ export default function TemplatesPage() {
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 3000) }
 
+  function revealEditor() {
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('.admin-main')?.scrollTo({ top: 0, behavior: 'smooth' })
+      document.querySelector<HTMLElement>('.message-editor-panel__body')?.scrollTo({ top: 0 })
+    })
+  }
+
   function openNew() {
     setSelectedId('new')
     setForm(EMPTY_FORM)
     setFormError('')
+    revealEditor()
   }
 
   function openEdit(t: WhatsAppTemplate) {
@@ -354,6 +368,7 @@ export default function TemplatesPage() {
       body_params: t.body_params || [], has_header_image: t.has_header_image,
     })
     setFormError('')
+    revealEditor()
   }
 
   function closePanel() { setSelectedId(null); setFormError('') }
@@ -426,210 +441,165 @@ export default function TemplatesPage() {
   const panelOpen = selectedId !== null
 
   return (
-    <div className="admin-legacy-workspace flex h-screen flex-col overflow-hidden" style={{ background: 'var(--bg)' }}>
+    <div className="message-library-page">
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-5 py-2.5 text-sm font-semibold text-white shadow-lg"
-          style={{ background: 'var(--brand)' }}>{toast}</div>
+        <div className="message-library-toast" role="status">{toast}</div>
       )}
 
-      {/* Top bar */}
-      <div className="flex flex-shrink-0 items-center justify-between px-6 py-4"
-        style={{ borderBottom: '1px solid var(--line)', background: 'var(--sidebar)' }}>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--brand)' }}>Creative studio</p>
-          <h1 className="text-xl font-bold mt-0.5" style={{ color: 'var(--ink)' }}>Message library</h1>
+      <header className="message-library-hero">
+        <div className="message-library-hero__identity">
+          <p className="admin-page__eyebrow">Creative studio</p>
+          <h1 className="admin-page__title">Message library</h1>
+          <p className="admin-page__description">
+            Manage the approved WhatsApp templates your team uses for invitations, passes and event updates.
+          </p>
         </div>
-        <button onClick={openNew} data-tour="templates-add-button"
-          className="rounded-full px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
-          style={{ background: 'var(--brand)' }}>
-          + Add template
-        </button>
-      </div>
+        <div className="message-library-hero__side">
+          <div className="message-library-overview" aria-label="Template overview">
+            <div><strong>{count}</strong><span>Templates</span></div>
+            <div><strong>{categories.length}</strong><span>Categories</span></div>
+            <div><strong>{availableVars.length}</strong><span>Guest fields</span></div>
+          </div>
+          <button onClick={openNew} data-tour="templates-add-button" className="message-library-add">
+            <span>＋</span> Add template
+          </button>
+        </div>
+      </header>
 
-      {/* Body: list + optional panel */}
-      <div className="flex flex-1 overflow-hidden">
-
-        {/* Left: categories + list */}
-        <div className="flex flex-col overflow-hidden" style={{ width: panelOpen ? '380px' : '100%', flexShrink: 0, borderRight: panelOpen ? '1px solid var(--line)' : 'none', transition: 'width 0.2s' }}>
-
-          {/* Categories */}
-          <div className="flex-shrink-0 px-5 py-3" style={{ borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--muted-2)' }}>Categories</p>
-              <button onClick={() => setAddingCat((v) => !v)}
-                className="text-xs font-semibold transition hover:opacity-70"
-                style={{ color: addingCat ? 'var(--danger)' : 'var(--brand)' }}>
-                {addingCat ? 'Cancel' : '+ New'}
-              </button>
+      <div className={`message-library-workspace${panelOpen ? ' is-panel-open' : ''}`}>
+        <section className="message-library-browser" aria-label="Message templates">
+          <div className="message-library-controls">
+            <div className="message-library-controls__top">
+              <div>
+                <strong>Your templates</strong>
+                <span>{count} approved message{count === 1 ? '' : 's'} available</span>
+              </div>
+              <label className="message-library-search">
+                <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="11" cy="11" r="7" /><path d="m16.5 16.5 4 4" />
+                </svg>
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search templates…"
+                  aria-label="Search templates"
+                />
+                {search && <button type="button" onClick={() => setSearch('')} aria-label="Clear search">×</button>}
+              </label>
             </div>
-            {addingCat && (
-              <form onSubmit={handleAddCategory} className="flex gap-2 mb-2">
-                <input required autoFocus value={newCatName} onChange={(e) => setNewCatName(e.target.value)}
-                  placeholder="Category name"
-                  className="flex-1 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
-                  style={{ background: 'var(--chip)', border: '1px solid var(--line)', color: 'var(--ink)' }} />
-                <button type="submit" disabled={catSubmitting}
-                  className="rounded-full px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-                  style={{ background: 'var(--brand)' }}>
-                  {catSubmitting ? '…' : 'Add'}
+
+            <div className="message-library-categories">
+              <div className="message-library-categories__label">
+                <span>Categories</span>
+                <button onClick={() => setAddingCat((value) => !value)}>{addingCat ? 'Cancel' : '+ New category'}</button>
+              </div>
+              {addingCat && (
+                <form onSubmit={handleAddCategory} className="message-category-form">
+                  <input required autoFocus value={newCatName} onChange={(event) => setNewCatName(event.target.value)} placeholder="Category name" />
+                  <button type="submit" disabled={catSubmitting}>{catSubmitting ? 'Adding…' : 'Add'}</button>
+                </form>
+              )}
+              <div className="message-category-pills">
+                <button onClick={() => setCategoryFilter('')} className={!categoryFilter ? 'is-active' : ''}>
+                  All templates <span>{!categoryFilter ? count : '•'}</span>
                 </button>
-              </form>
-            )}
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                onClick={() => setCategoryFilter('')}
-                className="rounded-full px-2.5 py-1 text-xs font-semibold transition"
-                style={{
-                  background: !categoryFilter ? 'var(--brand)' : 'var(--chip)',
-                  color: !categoryFilter ? '#fff' : 'var(--muted)',
-                  border: `1px solid ${!categoryFilter ? 'var(--brand)' : 'var(--line)'}`,
-                }}>
-                All
-              </button>
-              {categories.map((cat) => (
-                <span key={cat.id} className="flex items-center gap-1 rounded-full pl-2.5 pr-1 py-1"
-                  style={{
-                    background: categoryFilter === String(cat.id) ? 'var(--brand-soft)' : 'var(--chip)',
-                    border: `1px solid ${categoryFilter === String(cat.id) ? 'var(--brand)' : 'var(--line)'}`,
-                  }}>
-                  <button
-                    onClick={() => setCategoryFilter(categoryFilter === String(cat.id) ? '' : String(cat.id))}
-                    className="text-xs font-semibold"
-                    style={{ color: categoryFilter === String(cat.id) ? 'var(--brand)' : 'var(--muted)' }}>
-                    {cat.name}
-                  </button>
-                  <button onClick={() => handleDeleteCategory(cat)}
-                    className="flex items-center justify-center rounded-full h-4 w-4 text-[10px] transition hover:bg-[rgba(239,68,68,0.2)]"
-                    style={{ color: 'var(--muted-2)' }}>✕</button>
-                </span>
-              ))}
+                {categories.map((category) => (
+                  <span key={category.id} className={categoryFilter === String(category.id) ? 'is-active' : ''}>
+                    <button onClick={() => setCategoryFilter(categoryFilter === String(category.id) ? '' : String(category.id))}>{category.name}</button>
+                    <button onClick={() => handleDeleteCategory(category)} aria-label={`Delete ${category.name} category`}>×</button>
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Template list */}
-          <div className="flex-1 overflow-auto">
+          <div className="message-library-results">
             {loading ? (
-              <div className="py-12 text-center text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>
+              <div className="message-library-state"><i /><strong>Loading templates</strong><p>Preparing your message library…</p></div>
             ) : templates.length === 0 ? (
-              <div className="py-16 text-center">
-                <p className="text-sm" style={{ color: 'var(--muted)' }}>
-                  {categoryFilter ? 'No templates in this category.' : 'No templates yet.'}
-                </p>
+              <div className="message-library-state">
+                <span aria-hidden="true">✉</span>
+                <strong>{search ? 'No matching templates' : categoryFilter ? 'This category is empty' : 'Create your first template'}</strong>
+                <p>{search ? 'Try another name, Meta identifier, or message phrase.' : 'Add an approved Meta template so your team can start sending messages.'}</p>
+                {search || categoryFilter ? (
+                  <button onClick={() => { setSearch(''); setCategoryFilter('') }}>Clear filters</button>
+                ) : (
+                  <button onClick={openNew}>Add template</button>
+                )}
               </div>
             ) : (
-              <div>
-                {templates.map((t) => {
-                  const isActive = selectedId === t.id
+              <div className="message-template-grid">
+                {templates.map((template) => {
+                  const isSelected = selectedId === template.id
+                  const bodyPreview = template.body_text?.replace(/\s+/g, ' ').trim()
                   return (
-                    <div key={t.id}
-                      className="flex w-full items-center gap-3 px-5 py-4 transition-colors"
-                      style={{
-                        borderBottom: '1px solid var(--line)',
-                        background: isActive ? 'var(--brand-soft)' : 'transparent',
-                      }}>
-                      <button type="button" onClick={() => isActive ? closePanel() : openEdit(t)} className="min-w-0 flex-1 text-left">
-                      <div className="flex items-start gap-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold truncate" style={{ color: isActive ? 'var(--brand)' : 'var(--ink)' }}>
-                            {t.display_name || t.name}
-                          </p>
-                          {t.display_name && (
-                            <p className="text-[11px] font-mono mt-0.5 truncate" style={{ color: 'var(--muted-2)' }}>{t.name}</p>
+                    <article key={template.id} className={`message-template-card${isSelected ? ' is-selected' : ''}`}>
+                      <button type="button" onClick={() => isSelected ? closePanel() : openEdit(template)} className="message-template-card__main">
+                        <span className={`message-template-card__icon${template.has_header_image ? ' has-image' : ''}`} aria-hidden="true">
+                          {template.has_header_image ? (
+                            <svg width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8.5" cy="9" r="1.5"/><path d="m5 17 4.5-4.5 3 3 2-2L19 17"/></svg>
+                          ) : (
+                            <svg width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path d="M21 14a4 4 0 0 1-4 4H9l-5 3v-5a6 6 0 0 1-1-3.3V9a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"/><path d="M8 10h8M8 13h5"/></svg>
                           )}
-                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                            {t.category_name && (
-                              <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full"
-                                style={{ background: 'var(--chip)', border: '1px solid var(--line)', color: 'var(--muted)' }}>
-                                {t.category_name}
-                              </span>
-                            )}
-                            {t.has_header_image && (
-                              <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full"
-                                style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
-                                Image
-                              </span>
-                            )}
-                            {t.body_params?.length > 0 && (
-                              <span className="text-[10px]" style={{ color: 'var(--muted-2)' }}>
-                                {t.body_params.length} param{t.body_params.length !== 1 ? 's' : ''}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                        </span>
+                        <span className="message-template-card__content">
+                          <span className="message-template-card__status"><i className={template.is_active ? 'is-active' : ''} />{template.is_active ? 'Ready to use' : 'Inactive'}</span>
+                          <strong>{template.display_name || template.name}</strong>
+                          {template.display_name && <code>{template.name}</code>}
+                          <span className="message-template-card__description">{template.description || bodyPreview || 'No description added yet.'}</span>
+                          <span className="message-template-card__chips">
+                            <small>{template.category_name || 'Uncategorised'}</small>
+                            <small>{template.has_header_image ? 'Image header' : 'Text only'}</small>
+                            <small>{template.body_params?.length || 0} variable{template.body_params?.length === 1 ? '' : 's'}</small>
+                          </span>
+                        </span>
                       </button>
-                      <div className="flex flex-shrink-0 items-center gap-2">
-                        <button type="button" onClick={() => openEdit(t)} className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>Edit</button>
-                        <button type="button" disabled={deletingId === t.id} onClick={() => handleDelete(t.id)} className="text-xs font-semibold disabled:opacity-40" style={{ color: 'var(--danger)' }}>{deletingId === t.id ? '…' : 'Delete'}</button>
-                      </div>
-                    </div>
+                      <footer className="message-template-card__footer">
+                        <button type="button" onClick={() => openEdit(template)}>Edit template <span>→</span></button>
+                        <button type="button" disabled={deletingId === template.id} onClick={() => handleDelete(template.id)}>{deletingId === template.id ? 'Deleting…' : 'Delete'}</button>
+                      </footer>
+                    </article>
                   )
                 })}
               </div>
             )}
           </div>
 
-          {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex flex-shrink-0 items-center justify-between px-5 py-3"
-              style={{ borderTop: '1px solid var(--line)', background: 'var(--panel)' }}>
-              <p className="text-xs" style={{ color: 'var(--muted)' }}>
-                {count} templates · Page {page}/{totalPages}
-              </p>
-              <div className="flex items-center gap-1">
-                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
-                  className="rounded px-2.5 py-1 text-xs transition disabled:opacity-30"
-                  style={{ color: 'var(--muted)', border: '1px solid var(--line)' }}>‹</button>
-                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                  className="rounded px-2.5 py-1 text-xs transition disabled:opacity-30"
-                  style={{ color: 'var(--muted)', border: '1px solid var(--line)' }}>›</button>
+            <div className="message-library-pagination">
+              <p>{count} templates · Page {page} of {totalPages}</p>
+              <div>
+                <button onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page === 1}>← Previous</button>
+                <button onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={page === totalPages}>Next →</button>
               </div>
             </div>
           )}
-        </div>
+        </section>
 
-        {/* Right: detail / edit panel */}
         {panelOpen && (
-          <div className="flex flex-1 flex-col overflow-hidden">
-            {/* Panel header */}
-            <div className="flex flex-shrink-0 items-center justify-between px-6 py-4"
-              style={{ borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
+          <aside className="message-editor-panel">
+            <div className="message-editor-panel__header">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--muted-2)' }}>
-                  {selectedId === 'new' ? 'New template' : 'Edit template'}
-                </p>
-                {selectedTemplate && (
-                  <p className="text-sm font-semibold mt-0.5" style={{ color: 'var(--ink)' }}>
-                    {selectedTemplate.display_name || selectedTemplate.name}
-                  </p>
-                )}
+                <span>{selectedId === 'new' ? 'New template' : 'Editing template'}</span>
+                <strong>{selectedTemplate ? selectedTemplate.display_name || selectedTemplate.name : 'Create a message'}</strong>
               </div>
-              <div className="flex items-center gap-2">
+              <div>
                 {typeof selectedId === 'number' && (
-                  <button onClick={() => handleDelete(selectedId)} disabled={deletingId === selectedId}
-                    className="rounded-full px-3 py-1.5 text-xs font-semibold transition"
-                    style={{ border: '1px solid rgba(239,68,68,0.3)', color: 'var(--danger)' }}>
-                    {deletingId === selectedId ? 'Deleting…' : 'Delete'}
-                  </button>
+                  <button onClick={() => handleDelete(selectedId)} disabled={deletingId === selectedId} className="message-editor-delete">{deletingId === selectedId ? 'Deleting…' : 'Delete'}</button>
                 )}
-                <button onClick={closePanel}
-                  className="flex h-7 w-7 items-center justify-center rounded-full transition hover:bg-[var(--chip)]"
-                  style={{ color: 'var(--muted)' }}>✕</button>
+                <button onClick={closePanel} className="message-editor-close" aria-label="Close editor">×</button>
               </div>
             </div>
 
-            {/* Info banner */}
             {selectedId === 'new' && (
-              <div className="flex-shrink-0 px-6 py-3 text-xs" style={{ background: 'rgba(184,150,62,0.07)', borderBottom: '1px solid var(--line)', color: 'var(--muted)' }}>
-                Meta templates use numbered placeholders like{' '}
-                <code className="px-1 rounded" style={{ background: 'var(--chip)' }}>{'{{1}}'}</code>,{' '}
-                <code className="px-1 rounded" style={{ background: 'var(--chip)' }}>{'{{2}}'}</code>.
-                Paste the body text exactly as approved, then map each placeholder to a guest variable below.
+              <div className="message-editor-notice">
+                <strong>Match your approved Meta template</strong>
+                <p>Paste its exact body, including numbered placeholders such as <code>{'{{1}}'}</code> and <code>{'{{2}}'}</code>.</p>
               </div>
             )}
 
-            {/* Form */}
-            <div className="flex-1 overflow-auto px-6 py-5">
+            <div className="message-editor-panel__body">
               <TemplateForm
                 form={form} setForm={setForm} categories={categories}
                 availableVars={availableVars} error={formError} submitting={submitting}
@@ -638,20 +608,7 @@ export default function TemplatesPage() {
                 onSubmit={handleSubmit} onCancel={closePanel}
               />
             </div>
-          </div>
-        )}
-
-        {/* Empty right panel prompt */}
-        {!panelOpen && !loading && templates.length > 0 && (
-          <div className="hidden lg:flex flex-1 items-center justify-center" style={{ borderLeft: '1px solid var(--line)' }}>
-            <div className="text-center">
-              <svg width="40" height="40" fill="none" stroke="currentColor" strokeWidth="1.2" viewBox="0 0 24 24"
-                className="mx-auto mb-3" style={{ color: 'var(--muted-2)' }}>
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-              <p className="text-sm" style={{ color: 'var(--muted)' }}>Select a template to edit</p>
-            </div>
-          </div>
+          </aside>
         )}
       </div>
     </div>

@@ -49,6 +49,7 @@ export default function AddGuestPage() {
       phone_number: getValue('phone_number'),
       email:        getValue('email'),
       ticket_type:  getValue('ticket_type'),
+      seating_area: getValue('seating_area'),
       table_number: getValue('table_number'),
       seat_number:  getValue('seat_number'),
       aso_ebi_requested: asoEbiRequested,

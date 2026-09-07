@@ -1,6 +1,6 @@
 from django.db import transaction
 from rest_framework import serializers
-from ..models import Guest, GuestRequirement, SeatingTable
+from ..models import Guest, GuestRequirement, SeatingSection, SeatingTable
 from .event import CONFIGURABLE_FIELDS, _event_required_fields, _event_valid_ticket_values
 from accounts.models import MembershipRole
 from accounts.tenancy import get_request_organization, has_membership_role
@@ -108,12 +108,13 @@ class GuestSerializer(serializers.ModelSerializer):
     primary_guest_name = serializers.SerializerMethodField()
     plus_one_full_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     plus_one_phone_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    seating_area = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = Guest
         fields = (
             'id', 'event', 'event_name', 'full_name', 'phone_number', 'email',
-            'ticket_type', 'table_number', 'seat_number',
+            'ticket_type', 'seating_area', 'table_number', 'seat_number',
             'aso_ebi_requested', 'aso_ebi_quantity', 'plus_one_attending',
             'has_named_plus_one', 'plus_one_guest_id',
             'named_plus_one_name', 'is_plus_one', 'primary_guest_name',
@@ -183,10 +184,47 @@ class GuestSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'event': 'Event not found.'})
 
         required = _event_required_fields(event)
+        seating_area = str(data.get('seating_area', '') or '').strip()
+        table_number = str(data.get('table_number', '') or '').strip()
+        tables_exist = SeatingTable.objects.filter(event=event).exists()
+        table = None
+        if table_number and tables_exist:
+            table = SeatingTable.objects.filter(event=event, label__iexact=table_number).first()
+            if table is None:
+                raise serializers.ValidationError({'table_number': 'Select a table from this event’s seating plan.'})
+            data['table_number'] = table.label
+            if seating_area and table.section.name.casefold() != seating_area.casefold():
+                raise serializers.ValidationError({'seating_area': 'That table is in a different seating area.'})
+        if seating_area:
+            section = SeatingSection.objects.filter(
+                event=event, kind=SeatingSection.Kind.TABLES, name__iexact=seating_area,
+            ).first()
+            if section is None:
+                raise serializers.ValidationError({'seating_area': 'Select a seating area from this event’s plan.'})
+            data['seating_area'] = section.name
+
+        requested_seat = str(data.get('seat_number', '') or '').strip()
+        if requested_seat and table:
+            try:
+                seat_index = int(requested_seat)
+            except ValueError:
+                seat_index = 0
+            if not 1 <= seat_index <= table.seats:
+                raise serializers.ValidationError({'seat_number': f'Choose a seat from 1 to {table.seats}.'})
+            occupied = Guest.objects.filter(
+                event=event, table_number=table.label, seat_number=str(seat_index),
+            )
+            if self.instance:
+                occupied = occupied.exclude(pk=self.instance.pk)
+            if occupied.exists():
+                raise serializers.ValidationError({'seat_number': 'That seat is already assigned.'})
+            data['seat_number'] = str(seat_index)
 
         for field in CONFIGURABLE_FIELDS:
             if field in required:
                 value = data.get(field) or (getattr(self.instance, field, '') if self.instance else '')
+                if field in {'table_number', 'seat_number'} and (seating_area or table):
+                    value = 'assigned automatically'
                 if not str(value).strip():
                     raise serializers.ValidationError({field: f"{field} is required for this event."})
 
@@ -274,12 +312,28 @@ class GuestSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        seating_area = validated_data.pop('seating_area', '')
         plus_one_full_name = validated_data.pop('plus_one_full_name', '')
         plus_one_phone_number = validated_data.pop('plus_one_phone_number', '')
         event = validated_data.get('event')
         if event and 'scheduled_send_at' not in validated_data and event.pass_send_at:
             validated_data['scheduled_send_at'] = event.pass_send_at
         guest = super().create(validated_data)
+        from ..domains.seating import (
+            SeatingCapacityError, assign_guest_to_section, assign_guest_to_table,
+        )
+        try:
+            table = SeatingTable.objects.select_for_update().filter(
+                event=guest.event, label=guest.table_number,
+            ).first() if guest.table_number else None
+            if table:
+                assign_guest_to_table(guest.event_id, [guest.id], table.label, table.seats)
+            elif seating_area:
+                assign_guest_to_section(guest.event_id, guest.id, seating_area)
+            if table or seating_area:
+                guest.refresh_from_db(fields=['table_number', 'seat_number'])
+        except SeatingCapacityError as exc:
+            raise serializers.ValidationError({'seating': str(exc)}) from exc
         if guest.plus_one_attending:
             from ..plus_one import NamedPlusOneError, upsert_named_plus_one
             try:
@@ -292,9 +346,25 @@ class GuestSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        seating_area = validated_data.pop('seating_area', '')
         plus_one_full_name = validated_data.pop('plus_one_full_name', '')
         plus_one_phone_number = validated_data.pop('plus_one_phone_number', '')
         guest = super().update(instance, validated_data)
+        from ..domains.seating import (
+            SeatingCapacityError, assign_guest_to_section, assign_guest_to_table,
+        )
+        try:
+            table = SeatingTable.objects.select_for_update().filter(
+                event=guest.event, label=guest.table_number,
+            ).first() if guest.table_number else None
+            if table:
+                assign_guest_to_table(guest.event_id, [guest.id], table.label, table.seats)
+            elif seating_area:
+                assign_guest_to_section(guest.event_id, guest.id, seating_area)
+            if table or seating_area:
+                guest.refresh_from_db(fields=['table_number', 'seat_number'])
+        except SeatingCapacityError as exc:
+            raise serializers.ValidationError({'seating': str(exc)}) from exc
         from ..plus_one import NamedPlusOneError, get_named_plus_one, remove_named_plus_one, upsert_named_plus_one
         try:
             if guest.plus_one_attending:
@@ -323,7 +393,7 @@ class GuestListSerializer(serializers.ModelSerializer):
         model = Guest
         fields = (
             'id', 'event', 'event_name', 'full_name', 'phone_number',
-            'email', 'ticket_type', 'table_number',
+            'email', 'ticket_type', 'table_number', 'seat_number',
             'aso_ebi_requested', 'aso_ebi_quantity', 'plus_one_attending',
             'has_named_plus_one', 'plus_one_guest_id',
             'named_plus_one_name', 'is_plus_one', 'primary_guest_name',

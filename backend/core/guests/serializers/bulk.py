@@ -4,7 +4,7 @@ import logging
 from rest_framework import serializers
 
 logger = logging.getLogger(__name__)
-from ..models import Event, BulkUpload
+from ..models import Event, BulkUpload, Guest, SeatingTable
 from .event import _event_required_fields, _event_valid_ticket_values
 from accounts.tenancy import get_request_organization
 
@@ -13,11 +13,32 @@ TRUE_VALUES = {'1', 'true', 'yes', 'y', 'requested'}
 FALSE_VALUES = {'', '0', 'false', 'no', 'n', 'not requested'}
 
 
-def parse_guest_csv(event, csv_file):
+def parse_guest_csv(event, csv_file, *, replace_existing=False):
     """Parse a guest CSV without retaining request/serializer state."""
     required = _event_required_fields(event)
     valid_ticket_values = _event_valid_ticket_values(event)
     default_ticket = valid_ticket_values[0] if valid_ticket_values else 'general'
+    configured_tables = list(
+        SeatingTable.objects.filter(event=event)
+        .select_related('section')
+        .order_by('section__position', 'position', 'id')
+    )
+    tables_by_label = {table.label.casefold(): table for table in configured_tables}
+    tables_by_area = {}
+    for table in configured_tables:
+        tables_by_area.setdefault(table.section.name.casefold(), []).append(table)
+    occupied = {table.id: set() for table in configured_tables}
+    existing_guests = Guest.objects.none() if replace_existing else Guest.objects.filter(event=event)
+    for label, seat in existing_guests.exclude(table_number='').values_list(
+        'table_number', 'seat_number',
+    ):
+        table = tables_by_label.get(label.casefold())
+        try:
+            number = int(seat)
+        except (TypeError, ValueError):
+            continue
+        if table and 1 <= number <= table.seats:
+            occupied[table.id].add(number)
 
     csv_file.seek(0)
     raw = csv_file.read()
@@ -96,6 +117,57 @@ def parse_guest_csv(event, csv_file):
         if celebrant_name and event.celebrant_options and celebrant_name not in event.celebrant_options:
             errors.append("'celebrant_name' must match a configured celebrant.")
 
+        seating_area = row.get('seating_area', '').strip()
+        table_number = row.get('table_number', '').strip()
+        seat_number = row.get('seat_number', '').strip()
+        selected_table = None
+        selected_seat = None
+        if configured_tables and (seating_area or table_number or seat_number):
+            area_tables = tables_by_area.get(seating_area.casefold()) if seating_area else None
+            if seating_area and not area_tables:
+                errors.append(f"Unknown seating area '{seating_area}'.")
+            if table_number:
+                selected_table = tables_by_label.get(table_number.casefold())
+                if not selected_table:
+                    errors.append(f"Unknown table '{table_number}'.")
+                elif area_tables and selected_table not in area_tables:
+                    errors.append(f"Table '{table_number}' is not in seating area '{seating_area}'.")
+            elif area_tables:
+                selected_table = next(
+                    (table for table in area_tables if len(occupied[table.id]) < table.seats),
+                    None,
+                )
+                if not selected_table:
+                    errors.append(f"Seating area '{seating_area}' has no available seats.")
+            elif seat_number:
+                errors.append("'seat_number' needs a table_number or seating_area.")
+
+            if selected_table:
+                table_number = selected_table.label
+                if seat_number:
+                    try:
+                        selected_seat = int(seat_number)
+                    except ValueError:
+                        selected_seat = 0
+                    if not 1 <= selected_seat <= selected_table.seats:
+                        errors.append(
+                            f"'seat_number' must be between 1 and {selected_table.seats} for {selected_table.label}."
+                        )
+                    elif selected_seat in occupied[selected_table.id]:
+                        errors.append(f"Seat {selected_seat} at {selected_table.label} is already assigned.")
+                else:
+                    selected_seat = next(
+                        (number for number in range(1, selected_table.seats + 1)
+                         if number not in occupied[selected_table.id]),
+                        None,
+                    )
+                    if selected_seat is None:
+                        errors.append(f"Table '{selected_table.label}' has no available seats.")
+                seat_number = str(selected_seat) if selected_seat else ''
+
+        row['table_number'] = table_number
+        row['seat_number'] = seat_number
+
         for field in required:
             if not row.get(field, ''):
                 errors.append(f"'{field}' is required for this event.")
@@ -118,6 +190,9 @@ def parse_guest_csv(event, csv_file):
             error_report.append({'row': i, 'data': row, 'errors': errors})
             continue
 
+        if selected_table and selected_seat:
+            occupied[selected_table.id].add(selected_seat)
+
         valid_rows.append({
             '_csv_row': i,
             'event': event,
@@ -125,8 +200,8 @@ def parse_guest_csv(event, csv_file):
             'phone_number': row.get('phone_number', ''),
             'email': row.get('email', ''),
             'ticket_type': ticket_type,
-            'table_number': row.get('table_number', ''),
-            'seat_number': row.get('seat_number', ''),
+            'table_number': table_number,
+            'seat_number': seat_number,
             'aso_ebi_requested': aso_ebi_requested,
             'aso_ebi_quantity': aso_ebi_quantity,
             'plus_one_attending': plus_one_attending,
@@ -165,6 +240,7 @@ class BulkGuestUploadSerializer(serializers.Serializer):
         return parse_guest_csv(
             self.validated_data['event'],
             self.validated_data['csv_file'],
+            replace_existing=self.validated_data.get('replace_existing', False),
         )
 
 

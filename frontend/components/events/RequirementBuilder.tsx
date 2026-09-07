@@ -80,9 +80,10 @@ function fromRequirement(requirement: GuestRequirement): Draft {
 
 interface Props {
   eventId: number
+  collectionChannel: 'rsvp' | 'preferences'
 }
 
-export function RequirementBuilder({ eventId }: Props) {
+export function RequirementBuilder({ eventId, collectionChannel }: Props) {
   const [requirements, setRequirements] = useState<GuestRequirement[]>([])
   const [presets, setPresets] = useState<GuestRequirementPreset[]>([])
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -112,7 +113,7 @@ export function RequirementBuilder({ eventId }: Props) {
       unit: preset.unit,
       required: false,
       applies_to: preset.applies_to,
-      collect_on: 'both',
+      collect_on: collectionChannel,
     })
   }
 
@@ -192,8 +193,7 @@ export function RequirementBuilder({ eventId }: Props) {
         <h3 className="text-sm font-semibold text-[var(--ink)]">What you need from guests</h3>
         <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
           Ask for fabric sizes, meal choices, dietary needs — anything you will need to
-          total up and send to a vendor. Answers are collected with the RSVP or the
-          preferences form, and export as a spreadsheet.
+          total up and send to a vendor. These answers will be collected on the {collectionChannel === 'rsvp' ? 'RSVP page' : 'standalone preferences form'} and export as a spreadsheet.
         </p>
       </div>
 
@@ -246,7 +246,7 @@ export function RequirementBuilder({ eventId }: Props) {
                     <button type="button" onClick={() => move(index, 1)} disabled={index === requirements.length - 1}
                       aria-label={`Move ${requirement.label} down`}
                       className="grid h-8 w-8 place-items-center rounded-lg border border-[var(--line)] text-[var(--muted)] disabled:opacity-30">↓</button>
-                    <button type="button" onClick={() => { setError(''); setDraft(fromRequirement(requirement)) }}
+                    <button type="button" onClick={() => { setError(''); setDraft({ ...fromRequirement(requirement), collect_on: collectionChannel }) }}
                       className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink)]">Edit</button>
                     <button type="button" onClick={() => remove(requirement)}
                       className="rounded-lg px-3 py-1.5 text-xs font-semibold" style={{ color: 'var(--danger)' }}>Delete</button>
@@ -307,13 +307,11 @@ export function RequirementBuilder({ eventId }: Props) {
               )}
 
               <div>
-                <label className="form-label" htmlFor="req-collect">Asked on</label>
-                <select id="req-collect" className="form-control mt-1.5" value={draft.collect_on}
-                  onChange={(event) => setDraft({ ...draft, collect_on: event.target.value as RequirementCollectOn })}>
-                  <option value="both">{COLLECT_LABEL.both}</option>
-                  <option value="rsvp">{COLLECT_LABEL.rsvp}</option>
-                  <option value="preferences">{COLLECT_LABEL.preferences}</option>
-                </select>
+                <span className="form-label">Asked on</span>
+                <div className="form-control mt-1.5 flex items-center bg-[var(--bg)] text-sm font-semibold text-[var(--ink)]">
+                  {COLLECT_LABEL[collectionChannel]}
+                </div>
+                <p className="form-hint">Controlled by this event’s response workflow.</p>
               </div>
 
               {NEEDS_OPTIONS.includes(draft.kind) && (
@@ -348,7 +346,7 @@ export function RequirementBuilder({ eventId }: Props) {
                   <span>
                     <span className="block text-sm font-semibold text-[var(--ink)]">Guests must answer this</span>
                     <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                      Their RSVP will not go through until they do.
+                      Their {collectionChannel === 'rsvp' ? 'RSVP' : 'preferences form'} will not go through until they do.
                     </span>
                   </span>
                 </label>
@@ -369,7 +367,7 @@ export function RequirementBuilder({ eventId }: Props) {
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => { setError(''); setDraft({ ...BLANK }) }}
+            <button type="button" onClick={() => { setError(''); setDraft({ ...BLANK, collect_on: collectionChannel }) }}
               className="rounded-full px-4 py-2 text-xs font-bold text-white" style={{ background: 'var(--brand)' }}>
               + Build a question
             </button>

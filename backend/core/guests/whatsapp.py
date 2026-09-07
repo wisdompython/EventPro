@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 from django.conf import settings
 from django.utils import timezone
 from django.utils.text import slugify
@@ -10,8 +11,8 @@ def build_preferences_url(guest) -> str:
     event_slug = slugify(guest.event.name)[:48] if guest.event else 'event'
     guest_slug = slugify(guest.full_name)[:40] or 'guest'
     return (
-        f"{settings.SITE_URL.rstrip('/')}/preferences/"
-        f"{event_slug or 'event'}-{guest_slug}-{guest.preference_token}"
+        f"{settings.SITE_URL.rstrip('/')}/{event_slug or 'event'}/preferences/"
+        f"{guest_slug}-{guest.preference_code}"
     )
 
 # ---------------------------------------------------------------------------
@@ -56,7 +57,8 @@ def send_pass(guest) -> bool:
         logger.warning("Guest %s has no phone number — skipping WhatsApp send", guest.id)
         return False
 
-    # Pass image must be publicly accessible for Meta to fetch it
+    # A pass image is required. It can be sent by public URL in production or
+    # uploaded directly from storage during local development.
     if not guest.pass_image:
         logger.warning("Guest %s has no pass image — skipping WhatsApp send", guest.id)
         return False
@@ -80,15 +82,9 @@ def send_pass(guest) -> bool:
         return True
 
     try:
-        from pywa.types.templates import HeaderImage, BodyText, TemplateLanguage
+        from pywa.types.templates import BodyText, TemplateLanguage
 
         phone = _normalise_phone(guest.phone_number)
-        pass_url = _build_pass_url(guest)
-
-        if not pass_url or 'localhost' in pass_url or '127.0.0.1' in pass_url:
-            logger.error("Pass URL is not publicly accessible for guest %s: %s", guest.id, pass_url)
-            return False
-
         # Resolve template: event override → global default
         event = guest.event
         tmpl = event.whatsapp_template if (event and event.whatsapp_template_id) else None
@@ -106,11 +102,11 @@ def send_pass(guest) -> bool:
 
         params = []
         if has_header_image:
-            params.append(HeaderImage.params(image=pass_url))
+            params.append(_image_header_params(guest.pass_image, _build_pass_url(guest)))
         if body_param_values:
             params.append(BodyText.params(*body_param_values))
 
-        logger.info("Sending WhatsApp to %s | template=%s | pass_url=%s", phone, template_name, pass_url)
+        logger.info("Sending WhatsApp pass to %s | template=%s", phone, template_name)
 
         wa = _get_client()
         wa.send_template(to=phone, name=template_name, language=TemplateLanguage.ENGLISH, params=params)
@@ -186,7 +182,7 @@ def send_reminder(guest, template_name: str) -> bool:
         return True
 
     try:
-        from pywa.types.templates import BodyText, HeaderImage, TemplateLanguage
+        from pywa.types.templates import BodyText, TemplateLanguage
         from .models import WhatsAppTemplate
 
         phone = _normalise_phone(guest.phone_number)
@@ -214,15 +210,7 @@ def send_reminder(guest, template_name: str) -> bool:
                     guest.id,
                 )
                 return False
-            pass_url = _build_pass_url(guest)
-            if not pass_url or 'localhost' in pass_url or '127.0.0.1' in pass_url:
-                logger.error(
-                    "Pass URL is not publicly accessible for reminder guest %s: %s",
-                    guest.id,
-                    pass_url,
-                )
-                return False
-            params.append(HeaderImage.params(image=pass_url))
+            params.append(_image_header_params(guest.pass_image, _build_pass_url(guest)))
 
         if body_param_values:
             params.append(BodyText.params(*body_param_values))
@@ -291,11 +279,44 @@ def _normalise_phone(phone: str) -> str:
 
 
 def _build_pass_url(guest) -> str:
-    """Build the absolute public URL for the guest's pass image."""
+    """Build a browser-accessible URL for the guest's pass image.
+
+    Meta delivery does not depend on this URL in local development: image
+    bytes are uploaded directly when the configured base is not public.
+    """
     base = settings.WHATSAPP_MEDIA_BASE_URL if hasattr(settings, 'WHATSAPP_MEDIA_BASE_URL') else ''
     if not base:
-        # Fallback: construct from ALLOWED_HOSTS + MEDIA_URL
-        host = settings.ALLOWED_HOSTS[0] if settings.ALLOWED_HOSTS else 'localhost:8000'
-        scheme = 'https' if not settings.DEBUG else 'http'
-        base = f"{scheme}://{host}"
-    return f"{base}{settings.MEDIA_URL}{guest.pass_image.name}"
+        if settings.DEBUG:
+            base = 'http://localhost:8000'
+        else:
+            host = settings.ALLOWED_HOSTS[0] if settings.ALLOWED_HOSTS else ''
+            base = f'https://{host}' if host else ''
+    return f"{base.rstrip('/')}{settings.MEDIA_URL}{guest.pass_image.name}"
+
+
+def _image_header_params(image_field, browser_url: str = ''):
+    """Create a PyWA image header from a public URL or stored image bytes.
+
+    Meta cannot fetch localhost URLs. PyWA can upload bytes to Meta before it
+    sends the template, which makes real image-template testing work from a
+    local Docker environment without an ngrok or Cloudflare tunnel.
+    """
+    from pywa.types.templates import HeaderImage
+
+    is_public_url = (
+        browser_url.startswith(('http://', 'https://'))
+        and 'localhost' not in browser_url
+        and '127.0.0.1' not in browser_url
+    )
+    if is_public_url:
+        return HeaderImage.params(image=browser_url)
+
+    image_field.open('rb')
+    try:
+        content = image_field.read()
+    finally:
+        image_field.close()
+    if not content:
+        raise ValueError('The generated image is empty.')
+    mime_type = mimetypes.guess_type(image_field.name)[0] or 'image/png'
+    return HeaderImage.params(image=content, mime_type=mime_type)

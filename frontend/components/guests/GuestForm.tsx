@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import { Event } from '@/lib/api'
+import { api, Event, SeatingSection } from '@/lib/api'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { DateTimePicker } from '@/components/ui/DateTimePicker'
 import AsoEbiYardSelector from '@/components/rsvp/AsoEbiYardSelector'
@@ -14,8 +14,6 @@ const labelCls = 'form-label'
 const OPTIONAL_FIELDS = [
   { key: 'phone_number', label: 'Phone Number', type: 'tel',   placeholder: '+234 800 000 0000' },
   { key: 'email',        label: 'Email',         type: 'email', placeholder: 'optional' },
-  { key: 'table_number', label: 'Table Number',  type: 'text',  placeholder: 'optional' },
-  { key: 'seat_number',  label: 'Seat Number',   type: 'text',  placeholder: 'optional' },
 ] as const
 
 interface Props {
@@ -39,6 +37,10 @@ export function GuestForm({
   const [flowStep, setFlowStep] = useState(1)
   const [flowError, setFlowError] = useState('')
   const [scheduledSendAt, setScheduledSendAt] = useState('')
+  const [seatingSections, setSeatingSections] = useState<SeatingSection[]>([])
+  const [seatingArea, setSeatingArea] = useState('')
+  const [tableNumber, setTableNumber] = useState('')
+  const [seatNumber, setSeatNumber] = useState('')
   const formRef = useRef<HTMLFormElement>(null)
 
   useEffect(() => {
@@ -47,7 +49,20 @@ export function GuestForm({
     setPlusOneAttending(false)
     setFlowStep(1)
     setScheduledSendAt('')
+    setSeatingArea('')
+    setTableNumber('')
+    setSeatNumber('')
+    setSeatingSections([])
+    if (selectedEvent?.id) {
+      api.getSeatingSections(selectedEvent.id)
+        .then((sections) => setSeatingSections(sections.filter((section) => section.kind === 'tables')))
+        .catch(() => setSeatingSections([]))
+    }
   }, [selectedEvent?.id])
+
+  const area = seatingSections.find((section) => section.name === seatingArea)
+  const availableTables = area?.tables ?? seatingSections.flatMap((section) => section.tables)
+  const selectedTable = availableTables.find((table) => table.label === tableNumber)
 
   function continueFlow() {
     setFlowError('')
@@ -120,6 +135,19 @@ export function GuestForm({
           )
         })}
 
+        {seatingSections.length > 0 ? <div className="sm:col-span-2 rounded-2xl border border-[var(--line)] bg-[var(--bg)] p-4">
+          <div className="mb-4 flex flex-col justify-between gap-1 sm:flex-row sm:items-end"><div><p className="text-sm font-semibold text-[var(--ink)]">Seat this guest</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Optional. Choose only an area to use its next free table and seat automatically.</p></div><span className="text-[11px] font-semibold text-[var(--brand)]">{seatingSections.reduce((sum, section) => sum + section.tables.reduce((count, table) => count + Math.max(0, table.seats - table.assigned), 0), 0)} seats available</span></div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div><label className={labelCls}>Seating area</label><select name="seating_area" value={seatingArea} onChange={(event) => { setSeatingArea(event.target.value); setTableNumber(''); setSeatNumber('') }} className={select}><option value="">Not assigned yet</option>{seatingSections.map((section) => <option key={section.id} value={section.name}>{section.name}</option>)}</select></div>
+            <div><label className={labelCls}>Table</label><select name="table_number" value={tableNumber} onChange={(event) => { setTableNumber(event.target.value); setSeatNumber('') }} className={select} disabled={!seatingArea}><option value="">{seatingArea ? 'Auto-assign next table' : 'Choose an area first'}</option>{availableTables.map((table) => <option key={table.id} value={table.label} disabled={table.assigned >= table.seats}>{table.label} · {table.seats - table.assigned} free</option>)}</select></div>
+            <div><label className={labelCls}>Seat number</label><input name="seat_number" value={seatNumber} onChange={(event) => setSeatNumber(event.target.value)} type="number" min={1} max={selectedTable?.seats} disabled={!tableNumber} placeholder={tableNumber ? 'Next free seat' : 'Assigned automatically'} className={field} /></div>
+          </div>
+          {seatingArea && <p className="mt-3 text-xs font-medium text-[var(--brand)]">{tableNumber ? `${tableNumber}${seatNumber ? ` · Seat ${seatNumber}` : ' · next free seat'}` : `${seatingArea} · next available table and seat`}</p>}
+        </div> : <>
+          <div><label className={labelCls}>Table Number <span className="normal-case font-normal tracking-normal text-[var(--muted-2)]">(optional)</span></label><input name="table_number" placeholder="Set now or configure later" className={field} /></div>
+          <div><label className={labelCls}>Seat Number <span className="normal-case font-normal tracking-normal text-[var(--muted-2)]">(optional)</span></label><input name="seat_number" placeholder="optional" className={field} /></div>
+        </>}
+
         {selectedEvent?.collect_aso_ebi && (
           <div className="sm:col-span-2 rounded-[14px] border border-[var(--line)] bg-[var(--bg)] p-4">
             <label className="flex cursor-pointer items-start gap-3">
@@ -175,6 +203,7 @@ export function GuestForm({
           <div><span>Event</span><strong>{selectedEvent.name}</strong></div>
           <div><span>Pass delivery</span><strong>{selectedEvent.whatsapp_enabled ? 'WhatsApp enabled' : 'Manual delivery'}</strong></div>
           <div><span>Guest options</span><strong>{[selectedEvent.collect_aso_ebi && 'Aso Ebi', selectedEvent.allow_plus_one && 'Plus one', selectedEvent.collect_celebrant && 'Celebrant'].filter(Boolean).join(' · ') || 'Standard admission'}</strong></div>
+          <div><span>Seating</span><strong>{seatingArea ? tableNumber ? `${seatingArea} · ${tableNumber}${seatNumber ? ` · Seat ${seatNumber}` : ' · automatic seat'}` : `${seatingArea} · automatic table and seat` : 'Not assigned yet'}</strong></div>
         </div>}
       </div>
 

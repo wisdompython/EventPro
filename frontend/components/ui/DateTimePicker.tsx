@@ -87,7 +87,14 @@ export function DateTimePicker({ id, name, value, min, required, dataTour, onCha
 
   useEffect(() => {
     function closeOnOutsideClick(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Node
+      // The dialog is rendered through a portal, so it is not a DOM child of
+      // rootRef. Treat the portal panel as part of the picker; otherwise the
+      // document-level pointerdown closes and unmounts it before button click
+      // handlers (including "Apply date & time") can run.
+      if (!rootRef.current?.contains(target) && !panelRef.current?.contains(target)) {
+        setOpen(false)
+      }
     }
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') setOpen(false)

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, use } from 'react'
 import { useRouter } from 'next/navigation'
 import { api, Event, Font, WhatsAppTemplate } from '@/lib/api'
-import { watDateTimeInputToIso } from '@/lib/datetime'
+import { toWatDateTimeInput, watDateTimeInputToIso } from '@/lib/datetime'
 import type { TicketTypeDef } from '@/components/EventConfigPanel'
 import NameTypographyPanel from '@/components/NameTypographyPanel'
 import type { Zone } from '@/components/PassDesignPanel'
@@ -50,6 +50,7 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
   const [asoEbiLabel, setAsoEbiLabel] = useState('')
   const [asoEbiUnit, setAsoEbiUnit] = useState('')
   const [preferencesEnabled, setPreferencesEnabled] = useState(false)
+  const [preferencesDeadline, setPreferencesDeadline] = useState('')
   const [collectCelebrant, setCollectCelebrant] = useState(false)
   const [celebrantOptions, setCelebrantOptions] = useState<string[]>([])
   const [whatsappTemplate, setWhatsappTemplate] = useState<number | null>(null)
@@ -80,6 +81,7 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
         setAsoEbiLabel(ev.aso_ebi_label ?? '')
         setAsoEbiUnit(ev.aso_ebi_unit ?? '')
         setPreferencesEnabled(ev.preferences_enabled ?? false)
+        setPreferencesDeadline(ev.preferences_deadline ? toWatDateTimeInput(ev.preferences_deadline) : '')
         setCollectCelebrant(ev.collect_celebrant ?? false)
         setCelebrantOptions(ev.celebrant_options ?? [])
         setWhatsappTemplate(ev.whatsapp_template ?? null)
@@ -132,6 +134,9 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
     if (!rsvpEnabled && whatsappEnabled && passTiming === 'scheduled' && !passSendAt) {
       setError('Choose a date and time for scheduled guest-pass delivery.'); return
     }
+    if (preferencesEnabled && !rsvpEnabled && !preferencesDeadline) {
+      setError('Set a deadline for standalone preference submissions.'); setEditStep(2); return
+    }
     setError(''); setSubmitting(true)
     const fd = new FormData()
     fd.append('name', (form.elements.namedItem('name') as HTMLInputElement).value)
@@ -151,7 +156,7 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
     if (qrTouched) { if (qrZone) { fd.append('qr_zone_x', String(qrZone.x)); fd.append('qr_zone_y', String(qrZone.y)); fd.append('qr_zone_w', String(qrZone.w)); fd.append('qr_zone_h', String(qrZone.h)) } else { fd.append('qr_zone_x', ''); fd.append('qr_zone_y', ''); fd.append('qr_zone_w', ''); fd.append('qr_zone_h', '') } }
     if (nameTouched) { if (nameZone) { fd.append('name_zone_x', String(nameZone.x)); fd.append('name_zone_y', String(nameZone.y)); fd.append('name_zone_w', String(nameZone.w)); fd.append('name_zone_h', String(nameZone.h)) } else { fd.append('name_zone_x', ''); fd.append('name_zone_y', ''); fd.append('name_zone_w', ''); fd.append('name_zone_h', '') } }
     fd.append('name_font', selectedFont); fd.append('name_font_color', fontColor); fd.append('name_font_size_fraction', String(fontSizeFrac))
-    fd.append('qr_bg_color', qrBgColor); fd.append('ticket_types', JSON.stringify(ticketTypes)); fd.append('required_fields', JSON.stringify(requiredFields)); fd.append('whatsapp_enabled', String(whatsappEnabled)); fd.append('collect_aso_ebi', String(collectAsoEbi)); fd.append('allow_plus_one', String(allowPlusOne)); fd.append('plus_one_label', plusOneLabel.trim()); fd.append('aso_ebi_label', asoEbiLabel.trim()); fd.append('aso_ebi_unit', asoEbiUnit.trim()); fd.append('preferences_enabled', String(preferencesEnabled && !rsvpEnabled)); fd.append('collect_celebrant', String(collectCelebrant)); fd.append('celebrant_options', JSON.stringify(celebrantOptions))
+    fd.append('qr_bg_color', qrBgColor); fd.append('ticket_types', JSON.stringify(ticketTypes)); fd.append('required_fields', JSON.stringify(requiredFields)); fd.append('whatsapp_enabled', String(whatsappEnabled)); fd.append('collect_aso_ebi', String(collectAsoEbi)); fd.append('allow_plus_one', String(allowPlusOne)); fd.append('plus_one_label', plusOneLabel.trim()); fd.append('aso_ebi_label', asoEbiLabel.trim()); fd.append('aso_ebi_unit', asoEbiUnit.trim()); fd.append('preferences_enabled', String(preferencesEnabled && !rsvpEnabled)); fd.append('preferences_deadline', preferencesEnabled && !rsvpEnabled && preferencesDeadline ? watDateTimeInputToIso(preferencesDeadline) : ''); fd.append('collect_celebrant', String(collectCelebrant)); fd.append('celebrant_options', JSON.stringify(celebrantOptions))
     fd.append('rsvp_enabled', String(rsvpEnabled))
     fd.append('whatsapp_template', whatsappTemplate ? String(whatsappTemplate) : '')
     if (!rsvpEnabled) fd.append('pass_send_at', passTiming === 'scheduled' && passSendAt ? new Date(passSendAt).toISOString() : '')
@@ -176,7 +181,7 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
         <div className="form-flow__steps" style={{ gridTemplateColumns: 'repeat(5,minmax(0,1fr))' }}>{['Details','Guests','Delivery','Artwork','Type'].map((label,index) => <button type="button" key={label} onClick={() => index + 1 < editStep && setEditStep(index + 1)} className={index + 1 === editStep ? 'is-active' : index + 1 < editStep ? 'is-complete' : ''}><span>{index + 1 < editStep ? '✓' : index + 1}</span>{label}</button>)}</div>
         <div data-flow-stage="1" className={`form-flow__stage p-4 ${editStep === 1 ? 'is-active' : ''}`}><EventDetailsForm step={1} event={event} onValidationChange={setDateValid} /></div>
         <div data-flow-stage="2" className={`form-flow__stage p-4 ${editStep === 2 ? 'is-active' : ''}`}><GuestConfigSection step={2} ticketTypes={ticketTypes} requiredFields={requiredFields}
-          whatsappEnabled={whatsappEnabled} collectAsoEbi={collectAsoEbi} allowPlusOne={allowPlusOne} plusOneLabel={plusOneLabel} asoEbiLabel={asoEbiLabel} asoEbiUnit={asoEbiUnit} preferencesEnabled={preferencesEnabled} collectCelebrant={collectCelebrant} celebrantOptions={celebrantOptions} whatsappTemplate={whatsappTemplate} templates={waTemplates}
+          whatsappEnabled={whatsappEnabled} collectAsoEbi={collectAsoEbi} allowPlusOne={allowPlusOne} plusOneLabel={plusOneLabel} asoEbiLabel={asoEbiLabel} asoEbiUnit={asoEbiUnit} preferencesEnabled={preferencesEnabled} collectCelebrant={collectCelebrant} celebrantOptions={celebrantOptions} whatsappTemplate={whatsappTemplate} templates={waTemplates} showPreferencesToggle={!rsvpEnabled} showGuestPreferenceOptions={rsvpEnabled || preferencesEnabled}
           onChange={({ ticketTypes: tt, requiredFields: rf, whatsappEnabled: wa, collectAsoEbi: ae, allowPlusOne: po, plusOneLabel: pol, asoEbiLabel: ael, asoEbiUnit: aeu, preferencesEnabled: pe, collectCelebrant: cc, celebrantOptions: co, whatsappTemplate: wt }) => {
             if (tt !== undefined) setTicketTypes(tt)
             if (rf !== undefined) setRequiredFields(rf)
@@ -191,7 +196,8 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
             if (co !== undefined) setCelebrantOptions(co)
             if (wt !== undefined) setWhatsappTemplate(wt)
           }} />
-          <div className="mt-4"><RequirementBuilder eventId={Number(id)} /></div>
+          {preferencesEnabled && !rsvpEnabled && <div className="form-card mt-4"><FormSectionHeader title="Preferences deadline" description="The standalone form closes automatically at this date and time." /><div className="p-5 sm:p-6"><label className="form-label" htmlFor="preferences-deadline">Last time guests can submit</label><div className="mt-2"><DateTimePicker id="preferences-deadline" value={preferencesDeadline} onChange={setPreferencesDeadline} required /></div><p className="form-hint">Choose a time before the event, leaving enough time to send final totals to caterers and vendors.</p></div></div>}
+          {(rsvpEnabled || preferencesEnabled) ? <div className="mt-4"><RequirementBuilder eventId={Number(id)} collectionChannel={rsvpEnabled ? 'rsvp' : 'preferences'} /></div> : <div className="mt-4 rounded-xl border border-dashed border-[var(--line)] bg-[var(--bg)] px-5 py-4"><p className="text-sm font-semibold text-[var(--ink)]">Preference questions are unavailable</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Enable the standalone preferences form above, or enable RSVP in Delivery, before configuring meal, dietary, shuttle or other guest questions.</p></div>}
         </div>
         <div data-flow-stage="3" className={`form-flow__stage p-4 ${editStep === 3 ? 'is-active' : ''}`}>
         {whatsappEnabled && !event.rsvp_workflow_id && <div className="form-card">

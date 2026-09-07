@@ -200,6 +200,7 @@ export type CreateGuestPayload = Pick<
   Guest,
   'full_name' | 'phone_number' | 'email' | 'ticket_type' | 'table_number' | 'seat_number' | 'aso_ebi_requested' | 'aso_ebi_quantity' | 'plus_one_attending' | 'celebrant_name' | 'event'
 > & {
+  seating_area?: string;
   scheduled_send_at?: string | null;
   plus_one_full_name?: string;
   plus_one_phone_number?: string;
@@ -250,6 +251,7 @@ export interface Event {
   aso_ebi_term: string;
   aso_ebi_unit_term: string;
   preferences_enabled: boolean;
+  preferences_deadline: string | null;
   collect_celebrant: boolean;
   celebrant_options: string[];
   whatsapp_enabled: boolean;
@@ -460,6 +462,7 @@ export interface GuestPreferencesDetails {
   event_name: string;
   event_date: string;
   venue: string;
+  preferences_deadline: string | null;
   allow_plus_one: boolean;
   collect_aso_ebi: boolean;
   /** Resolved organiser wording, already defaulted server-side. */
@@ -476,6 +479,7 @@ export interface GuestPreferencesDetails {
   celebrant_name: string;
   submitted_at: string | null;
   can_respond: boolean;
+  closed_reason: 'collection_disabled' | 'deadline_passed' | 'event_ended' | null;
 }
 
 

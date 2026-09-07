@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { Event } from '@/lib/api'
+import { Event, SeatingSection } from '@/lib/api'
 
 interface Props {
   events: Event[]
@@ -10,6 +10,7 @@ interface Props {
   requiredCols: string[]
   optionalCols: string[]
   ticketTypes: { value: string; label: string }[] | undefined
+  seatingSections: SeatingSection[]
   replaceExisting: boolean
   onReplaceExistingChange: (replace: boolean) => void
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void
@@ -23,13 +24,14 @@ function formatBytes(bytes: number) {
 }
 
 export function UploadForm({
-  events, selectedEvent, submitting, requiredCols, optionalCols, ticketTypes,
+  events, selectedEvent, submitting, requiredCols, optionalCols, ticketTypes, seatingSections,
   replaceExisting, onReplaceExistingChange, onSubmit, onEventChange,
 }: Props) {
   const [step, setStep] = useState(1)
   const [file, setFile] = useState<File | null>(null)
   const [flowError, setFlowError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const seatingTables = seatingSections.flatMap((section) => section.tables)
 
   function continueFlow() {
     setFlowError('')
@@ -70,6 +72,8 @@ export function UploadForm({
           <div><span>Required columns</span><p>{requiredCols.map((column) => <code key={column}>{column}</code>)}</p></div>
           <div><span>Optional columns</span><p>{optionalCols.map((column) => <code key={column}>{column}</code>)}</p></div>
           {ticketTypes?.length ? <div><span>Ticket values</span><p>{ticketTypes.map((ticket) => <code key={ticket.value}>{ticket.value}</code>)}</p></div> : null}
+          {seatingSections.length ? <div><span>Seating area values</span><p>{seatingSections.map((section) => <code key={section.id}>{section.name}</code>)}</p><small>Use <code>seating_area</code> by itself for automatic table and seat assignment, or add a listed <code>table_number</code>.</small></div> : null}
+          {seatingTables.length ? <div><span>Table number values</span><p>{seatingTables.slice(0, 24).map((table) => <code key={table.id}>{table.label}</code>)}{seatingTables.length > 24 ? <code>+{seatingTables.length - 24} more</code> : null}</p></div> : null}
         </div>
         <label className={`import-dropzone ${file ? 'has-file' : ''}`}>
           <input ref={fileRef} data-tour="bulk-csv-input" name="csv_file" type="file" accept=".csv,text/csv" required onChange={(event) => { const next = event.target.files?.[0] ?? null; setFile(next); setFlowError('') }}/>

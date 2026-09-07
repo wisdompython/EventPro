@@ -1,3 +1,5 @@
+import uuid
+
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.utils import timezone
@@ -21,19 +23,31 @@ class GuestPreferencesView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'public_rsvp'
 
-    def get_guest(self, token):
-        return get_object_or_404(
-            Guest.objects.select_related('event'),
-            preference_token=token,
-        )
+    def get_guest(self, identifier):
+        guests = Guest.objects.select_related('event')
+        if len(str(identifier)) == 6:
+            return get_object_or_404(guests, preference_code=identifier)
+        try:
+            legacy_token = uuid.UUID(str(identifier))
+        except (TypeError, ValueError, AttributeError):
+            legacy_token = None
+        return get_object_or_404(guests, preference_token=legacy_token)
 
     @staticmethod
-    def can_respond(guest):
-        return bool(
-            guest.event.preferences_enabled
-            and not guest.event.is_ended
-            and guest.event.date > timezone.now()
-        )
+    def closed_reason(guest):
+        event = guest.event
+        now = timezone.now()
+        if not event.preferences_enabled:
+            return 'collection_disabled'
+        if event.is_ended or event.date <= now:
+            return 'event_ended'
+        if event.preferences_deadline and event.preferences_deadline <= now:
+            return 'deadline_passed'
+        return None
+
+    @classmethod
+    def can_respond(cls, guest):
+        return cls.closed_reason(guest) is None
 
     def get(self, request, token):
         guest = self.get_guest(token)
@@ -45,6 +59,7 @@ class GuestPreferencesView(APIView):
             'event_name': event.name,
             'event_date': event.date,
             'venue': event.venue,
+            'preferences_deadline': event.preferences_deadline,
             'allow_plus_one': event.allow_plus_one,
             'collect_aso_ebi': event.collect_aso_ebi,
             'requirements': describe_requirements(
@@ -63,6 +78,7 @@ class GuestPreferencesView(APIView):
             'celebrant_name': guest.celebrant_name,
             'submitted_at': guest.preferences_submitted_at,
             'can_respond': self.can_respond(guest),
+            'closed_reason': self.closed_reason(guest),
         })
 
     @transaction.atomic

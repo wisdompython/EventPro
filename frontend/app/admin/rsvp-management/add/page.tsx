@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { api, Event, RsvpWorkflowStatus, WhatsAppTemplate } from '@/lib/api'
 import ZoneSelector, { Zone } from '@/components/ZoneSelector'
 import { DateTimePicker } from '@/components/ui/DateTimePicker'
+import './rsvp-setup.css'
 
 function toLocalInput(value: string | null) {
   if (!value) return ''
@@ -29,7 +30,6 @@ function ordinalDate(value: string) {
 }
 
 const fieldClass = 'form-control mt-2'
-const fieldStyle = undefined
 
 export default function AddRsvpWorkflowPage() {
   const router = useRouter()
@@ -247,70 +247,59 @@ export default function AddRsvpWorkflowPage() {
     ['Response deadline', deadline ? new Date(`${deadline}T12:00:00`).toLocaleDateString('en-GB', { dateStyle: 'long' }) : 'No deadline'],
   ]
 
-  return (
-    <form onSubmit={saveWorkflow} className="admin-page admin-page--editor">
-      <button type="button" onClick={() => router.push('/admin/rsvp-management')} className="mb-4 text-xs font-semibold" style={{ color: 'var(--brand)' }}>← RSVP management</button>
-      <div className="form-card form-flow">
-      <div className="form-flow__topline"><div><p>Attendance workflow</p><h2>{['Choose the event','Messages & timing','Review and create'][step - 1]}</h2></div><strong>{step}<span>/03</span></strong></div>
-      <div className="form-flow__progress"><i style={{ width: `${step * 33.333}%` }}/></div>
-      <div className="form-flow__steps">
-        {['Choose event', 'Messages & timing', 'Review'].map((label, index) => {
-          const number = index + 1
-          return <button type="button" key={label} onClick={() => number < step && setStep(number)} className={number === step ? 'is-active' : number < step ? 'is-complete' : ''}><span>{number < step ? '✓' : number}</span>{label}</button>
-        })}
+  return <form onSubmit={saveWorkflow} className="rsvp-setup admin-page">
+    <div className="rsvp-setup__hero">
+      <button type="button" onClick={() => router.push('/admin/rsvp-management')} className="rsvp-setup__back">← RSVP management</button>
+      <div className="rsvp-setup__hero-row">
+        <div><p className="rsvp-setup__eyebrow">Attendance workflow</p><h1>{existingWorkflowId ? 'Edit RSVP setup' : 'Create RSVP setup'}</h1><p>Prepare the invitation, response window and confirmed-pass delivery before anything is sent.</p></div>
+        {selectedEvent && <div className="rsvp-setup__event-chip"><span>Selected event</span><strong>{selectedEvent.name}</strong><small>{new Date(selectedEvent.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</small></div>}
       </div>
+      <div className="rsvp-setup__steps">
+        {['Choose event', 'Invitation & timing', 'Review'].map((label, index) => { const number = index + 1; return <button type="button" key={label} onClick={() => number < step && setStep(number)} className={number === step ? 'is-active' : number < step ? 'is-complete' : ''}><span>{number < step ? '✓' : number}</span><b>{label}</b><i /></button> })}
+      </div>
+    </div>
 
-      <div className="p-5 sm:p-6">
-        {step === 1 && <div>
-          <h2 className="text-base font-semibold">Which event needs RSVP?</h2>
-          <p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>Events already attached to another workflow are not shown.</p>
-          <label className="mt-5 block text-xs font-semibold" style={{ color: 'var(--muted)' }}>Event</label>
-          <select value={eventId ?? ''} disabled={!!existingWorkflowId} onChange={(e) => setEventId(e.target.value ? Number(e.target.value) : null)} className={`${fieldClass} disabled:opacity-60`} style={fieldStyle}>
-            <option value="">Select an upcoming event</option>
-            {events.map((item) => <option key={item.id} value={item.id}>{item.name} — {new Date(item.date).toLocaleDateString('en-GB')}</option>)}
-          </select>
-          {events.length === 0 && <p className="mt-3 text-xs" style={{ color: 'var(--warn)' }}>There are no eligible upcoming events without an RSVP setup.</p>}
-        </div>}
+    {error && <div role="alert" className="rsvp-setup__error">{error}</div>}
 
-        {step === 2 && <div>
-          <h2 className="text-base font-semibold">Configure messages and timing</h2>
-          <p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>The guest pass remains held until the guest confirms and its delivery time arrives.</p>
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <div><label className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>RSVP invitation template</label><select value={invitationTemplate ?? ''} onChange={(e) => setInvitationTemplate(e.target.value ? Number(e.target.value) : null)} className={fieldClass} style={fieldStyle}><option value="">Select template</option>{invitationOptions.map((template) => <option key={template.id} value={template.id}>{template.display_name || template.name}{template.has_header_image ? ' — image' : ' — message only'}</option>)}</select>{invitationOptions.length === 0 && <p className="mt-2 text-[11px]" style={{ color: 'var(--warn)' }}>Create an active template containing the rsvp_link variable first.</p>}</div>
-            <div><label className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>Pass template after “Yes”</label><select value={passTemplate ?? ''} disabled={!autoSendPass} onChange={(e) => setPassTemplate(e.target.value ? Number(e.target.value) : null)} className={`${fieldClass} disabled:opacity-50`} style={fieldStyle}><option value="">— {passDefaultLabel} —</option>{passOptions.map((template) => <option key={template.id} value={template.id}>{template.display_name || template.name}</option>)}</select><p className="mt-2 text-[11px]" style={{ color: 'var(--muted)' }}>Only image-header templates are shown. Leave on the default to reuse the event’s guest-pass template.</p></div>
-            <div><label className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>Send RSVP invitations</label><select value={invitationTiming} onChange={(e) => setInvitationTiming(e.target.value as 'immediate' | 'scheduled')} className={fieldClass} style={fieldStyle}><option value="immediate">Send immediately on launch</option><option value="scheduled">Schedule for later</option></select>{invitationTiming === 'scheduled' && <div className="mt-3"><DateTimePicker value={invitationSendAt} onChange={setInvitationSendAt} required /></div>}</div>
-            <div><label className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>Response deadline</label><input type="date" value={deadline} max={selectedEvent?.date.slice(0, 10)} onChange={(e) => setDeadline(e.target.value)} className={fieldClass} style={fieldStyle}/></div>
+    {step === 1 && <section className="rsvp-setup__panel">
+      <div className="rsvp-setup__section-heading"><span>01</span><div><h2>Which event needs RSVP?</h2><p>Only upcoming events without another RSVP workflow are available.</p></div></div>
+      {events.length ? <div className="rsvp-event-grid">{events.map((item) => <button type="button" key={item.id} disabled={!!existingWorkflowId && item.id !== eventId} onClick={() => setEventId(item.id)} className={eventId === item.id ? 'is-selected' : ''}><span className="rsvp-event-grid__date"><b>{new Date(item.date).toLocaleDateString('en-GB', { day: '2-digit' })}</b><small>{new Date(item.date).toLocaleDateString('en-GB', { month: 'short' })}</small></span><span><strong>{item.name}</strong><small>{item.venue || 'Venue not added'} · {item.guest_count} guests</small></span><i>{eventId === item.id ? '✓' : '→'}</i></button>)}</div> : <div className="rsvp-setup__empty"><strong>No eligible events</strong><p>Create an upcoming event or remove its existing RSVP workflow first.</p></div>}
+    </section>}
+
+    {step === 2 && <div className="rsvp-setup__workspace">
+      <div className="rsvp-setup__main">
+        <section className="rsvp-setup__panel">
+          <div className="rsvp-setup__section-heading"><span>01</span><div><h2>Guest invitation</h2><p>Choose the approved WhatsApp message and when it should go out.</p></div></div>
+          <div className="rsvp-setup__fields">
+            <div className="rsvp-setup__field rsvp-setup__field--wide"><label>RSVP invitation template <em>Required</em></label><select value={invitationTemplate ?? ''} onChange={(e) => setInvitationTemplate(e.target.value ? Number(e.target.value) : null)} className={fieldClass}><option value="">Select an approved template</option>{invitationOptions.map((template) => <option key={template.id} value={template.id}>{template.display_name || template.name}{template.has_header_image ? ' — includes image' : ' — message only'}</option>)}</select>{invitationOptions.length === 0 && <p className="is-warning">Create an active template containing the rsvp_link variable first.</p>}</div>
+            <div className="rsvp-setup__field"><label>Send invitations</label><select value={invitationTiming} onChange={(e) => setInvitationTiming(e.target.value as 'immediate' | 'scheduled')} className={fieldClass}><option value="immediate">Immediately when launched</option><option value="scheduled">Schedule for later</option></select>{invitationTiming === 'scheduled' && <div className="mt-3"><DateTimePicker value={invitationSendAt} onChange={setInvitationSendAt} required /></div>}</div>
+            <div className="rsvp-setup__field"><label>Response deadline <em>Recommended</em></label><input type="date" value={deadline} max={selectedEvent?.date.slice(0, 10)} onChange={(e) => setDeadline(e.target.value)} className={fieldClass}/><p>Guests can respond until 11:59 PM on this date.</p></div>
           </div>
-          <div className="mt-5 rounded-xl p-4 sm:p-5" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-              <div><h3 className="text-sm font-semibold">1. RSVP artwork <span className="font-normal" style={{ color: 'var(--muted)' }}>(optional)</span></h3><p className="mt-1 max-w-xl text-xs leading-5" style={{ color: 'var(--muted)' }}>Upload the RSVP design without a QR code. We will add each guest’s name and attach the personalised image to their RSVP WhatsApp message.</p></div>
-              <label className="cursor-pointer whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold" style={{ border: '1px solid var(--brand)', color: 'var(--brand)' }}>
-                {hasInvitationArtwork ? 'Replace artwork' : 'Upload artwork'}
-                <input type="file" accept="image/png,image/jpeg" className="sr-only" onChange={(event) => chooseInvitationArtwork(event.target.files?.[0] || null)} />
-              </label>
-            </div>
-            {invitationArtworkUrl && (
-              <div className="mt-5">
-                <p className="mb-3 text-xs font-semibold" style={{ color: 'var(--ink)' }}>2. Drag over the space where the guest’s name should appear</p>
-                <div className="mx-auto max-w-lg">
-                  <ZoneSelector imageUrl={invitationArtworkUrl} zone={invitationNameZone} onChange={setInvitationNameZone}
-                    label="Guest name" color="amber" borderColor="#d4af37" bgColor="rgba(212,175,55,0.18)" dotColor="#d4af37" />
-                </div>
-                <p className="mt-3 text-xs" style={{ color: selectedInvitation?.has_header_image ? 'var(--success)' : 'var(--warn)' }}>{selectedInvitation?.has_header_image ? 'Ready to attach using the selected image-header template.' : 'Choose an RSVP template marked “image” above.'}</p>
-              </div>
-            )}
-          </div>
-          <label className="mt-4 flex items-start gap-2 text-sm"><input type="checkbox" checked={autoSendPass} onChange={(e) => setAutoSendPass(e.target.checked)} className="mt-1 accent-[var(--brand)]"/><span>Automatically deliver passes to guests who confirm.</span></label>
-          {autoSendPass && <div className="mt-4"><label className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>Send confirmed guest passes</label><select value={passTiming} onChange={(e) => setPassTiming(e.target.value as 'immediate' | 'scheduled')} className={fieldClass} style={fieldStyle}><option value="immediate">Send immediately after confirmation</option><option value="scheduled">Schedule for later</option></select>{passTiming === 'scheduled' && <div className="mt-3"><DateTimePicker value={passSendAt} onChange={setPassSendAt} required /></div>}</div>}
-          <div className="mt-5 rounded-lg p-4" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}><p className="mb-3 text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)' }}>WhatsApp preview</p><p className="whitespace-pre-wrap text-sm leading-6">{preview}</p><p className="mt-4 rounded-md px-3 py-2 text-xs" style={{ background: 'var(--panel)', color: 'var(--brand)' }}>Each guest receives a different secure RSVP link.</p></div>
-        </div>}
+        </section>
 
-        {step === 3 && <div><h2 className="text-base font-semibold">Review workflow</h2><p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>Saving does not send messages. Launching activates this plan.</p><div className="mt-5 divide-y" style={{ borderColor: 'var(--line)' }}>{reviewRows.map(([label, value]) => <div key={label} className="flex flex-col justify-between gap-1 py-3 text-sm sm:flex-row"><span style={{ color: 'var(--muted)' }}>{label}</span><span className="font-semibold sm:text-right">{value || '—'}</span></div>)}</div></div>}
+        <section className="rsvp-setup__panel">
+          <div className="rsvp-setup__section-heading"><span>02</span><div><h2>Invitation artwork <small>Optional</small></h2><p>Personalise an image with each guest’s name before attaching it.</p></div><label className="rsvp-setup__upload">{hasInvitationArtwork ? 'Replace artwork' : 'Upload artwork'}<input type="file" accept="image/png,image/jpeg" className="sr-only" onChange={(event) => chooseInvitationArtwork(event.target.files?.[0] || null)} /></label></div>
+          {!invitationArtworkUrl ? <div className="rsvp-setup__artwork-empty"><span>PNG or JPEG</span><strong>Add invitation artwork when your WhatsApp template has an image header</strong><small>Maximum file size: 5 MB</small></div> : <div className="rsvp-setup__artwork-editor"><div><strong>Place the guest name</strong><p>Drag over the exact area where the personalised name should appear.</p></div><div className="mx-auto max-w-lg"><ZoneSelector imageUrl={invitationArtworkUrl} zone={invitationNameZone} onChange={setInvitationNameZone} label="Guest name" color="amber" borderColor="#d4af37" bgColor="rgba(212,175,55,0.18)" dotColor="#d4af37" /></div><p className={selectedInvitation?.has_header_image ? 'is-ready' : 'is-warning'}>{selectedInvitation?.has_header_image ? '✓ Artwork is compatible with the selected template.' : 'Choose an RSVP template that includes an image header.'}</p></div>}
+        </section>
 
-        {error && <p className="mt-5 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>{error}</p>}
-        <div className="form-flow__footer -mx-5 -mb-6 mt-6 sm:-mx-6"><button type="button" onClick={() => step === 1 ? router.push('/admin/rsvp-management') : setStep(step - 1)} className="admin-secondary-action">{step === 1 ? 'Cancel' : '← Back'}</button>{step < 3 ? <button type="button" onClick={continueSetup} className="admin-primary-action">Continue →</button> : <button type="submit" disabled={saving} className="admin-primary-action disabled:opacity-50">{saving ? 'Saving…' : existingWorkflowId ? 'Save RSVP setup' : 'Create RSVP setup'}</button>}</div>
+        <section className="rsvp-setup__panel">
+          <div className="rsvp-setup__section-heading"><span>03</span><div><h2>After a guest confirms</h2><p>Choose whether Event Pro should release and deliver their pass.</p></div><button type="button" role="switch" aria-checked={autoSendPass} onClick={() => setAutoSendPass(!autoSendPass)} className={`rsvp-setup__switch ${autoSendPass ? 'is-on' : ''}`}><i /></button></div>
+          {autoSendPass ? <div className="rsvp-setup__fields"><div className="rsvp-setup__field"><label>Confirmed-pass template</label><select value={passTemplate ?? ''} onChange={(e) => setPassTemplate(e.target.value ? Number(e.target.value) : null)} className={fieldClass}><option value="">{passDefaultLabel}</option>{passOptions.map((template) => <option key={template.id} value={template.id}>{template.display_name || template.name}</option>)}</select><p>Only image-header pass templates are available.</p></div><div className="rsvp-setup__field"><label>Send confirmed passes</label><select value={passTiming} onChange={(e) => setPassTiming(e.target.value as 'immediate' | 'scheduled')} className={fieldClass}><option value="immediate">Immediately after confirmation</option><option value="scheduled">At a scheduled time</option></select>{passTiming === 'scheduled' && <div className="mt-3"><DateTimePicker value={passSendAt} onChange={setPassSendAt} required /></div>}</div></div> : <div className="rsvp-setup__manual-note"><strong>Manual pass delivery</strong><p>Guests can still confirm attendance, but your team will decide when to send each pass.</p></div>}
+        </section>
       </div>
-      </div>
-    </form>
-  )
+
+      <aside className="rsvp-setup__aside">
+        <div className="rsvp-preview"><div className="rsvp-preview__top"><span>WhatsApp preview</span><i>● ● ●</i></div><div className="rsvp-preview__body"><div className="rsvp-preview__bubble"><strong>{selectedInvitation?.display_name || selectedInvitation?.name || 'Invitation message'}</strong><p>{preview}</p><small>12:30 PM ✓✓</small></div></div><div className="rsvp-preview__secure">🔒 Every guest receives a unique six-character RSVP link.</div></div>
+        <div className="rsvp-setup__checklist"><h3>Ready to continue?</h3>{[['Invitation template', !!invitationTemplate], ['Response window', !!deadline], ['Artwork placement', !hasInvitationArtwork || !!invitationNameZone], ['Confirmed-pass plan', !autoSendPass || !!selectedEvent?.design_template]].map(([label, ready]) => <div key={String(label)} className={ready ? 'is-ready' : ''}><span>{ready ? '✓' : '○'}</span>{label}</div>)}</div>
+      </aside>
+    </div>}
+
+    {step === 3 && <section className="rsvp-setup__panel rsvp-setup__review">
+      <div className="rsvp-setup__section-heading"><span>03</span><div><h2>Review the complete workflow</h2><p>Saving creates the setup only. No invitation is sent until you launch it.</p></div></div>
+      <div className="rsvp-review-grid">{reviewRows.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value || '—'}</strong></div>)}</div>
+      <div className="rsvp-setup__launch-note"><span>✓</span><div><strong>Safe to save</strong><p>You can review recipients and make changes before launching this RSVP workflow.</p></div></div>
+    </section>}
+
+    <div className="rsvp-setup__footer"><button type="button" onClick={() => step === 1 ? router.push('/admin/rsvp-management') : setStep(step - 1)} className="admin-secondary-action">{step === 1 ? 'Cancel' : '← Back'}</button><span>Step {step} of 3</span>{step < 3 ? <button type="button" onClick={continueSetup} className="admin-primary-action">Continue →</button> : <button type="submit" disabled={saving} className="admin-primary-action disabled:opacity-50">{saving ? 'Saving…' : existingWorkflowId ? 'Save RSVP setup' : 'Create RSVP setup'}</button>}</div>
+  </form>
 }

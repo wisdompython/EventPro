@@ -22,11 +22,28 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [sidebarClosed, setSidebarClosed] = useState(false)
+  const [pendingNavigation, setPendingNavigation] = useState<{ href: string; label: string } | null>(null)
   useRequireAuth()
 
   useEffect(() => {
     setSidebarClosed(window.localStorage.getItem('event-pro-sidebar-closed') === 'true')
   }, [])
+
+  useEffect(() => {
+    setPendingNavigation(null)
+    setMobileOpen(false)
+  }, [pathname])
+
+  useEffect(() => {
+    if (!pendingNavigation) return
+    const timeout = window.setTimeout(() => setPendingNavigation(null), 10_000)
+    return () => window.clearTimeout(timeout)
+  }, [pendingNavigation])
+
+  function beginNavigation(href: string, label: string) {
+    if (href === pathname) return
+    setPendingNavigation({ href, label })
+  }
 
   function toggleSidebar() {
     setSidebarClosed((current) => {
@@ -45,10 +62,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <TourProvider>
-      <div className={`admin-shell${sidebarClosed ? ' is-sidebar-closed' : ''}`}>
-        <NavSidebar user={user} logout={logout} onCollapse={toggleSidebar} />
-        <MobileNav user={user} logout={logout} open={mobileOpen} onClose={() => setMobileOpen(false)} />
+      <div className={`admin-shell${sidebarClosed ? ' is-sidebar-closed' : ''}${pendingNavigation ? ' is-navigating' : ''}`}>
+        <NavSidebar user={user} logout={logout} onCollapse={toggleSidebar} pendingHref={pendingNavigation?.href ?? null} onNavigate={beginNavigation} />
+        <MobileNav user={user} logout={logout} open={mobileOpen} onClose={() => setMobileOpen(false)} pendingHref={pendingNavigation?.href ?? null} onNavigate={beginNavigation} />
         <div className="admin-shell__workspace">
+          {pendingNavigation && (
+            <div className="admin-navigation-feedback" role="status" aria-live="polite">
+              <i aria-hidden="true" />
+              <span>Opening {pendingNavigation.label}…</span>
+            </div>
+          )}
           <header className="admin-topbar">
             <div className="admin-topbar__title">
               <button onClick={() => setMobileOpen(true)} className="admin-menu-button" aria-label="Open navigation">
@@ -71,14 +94,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <div><p>Event Pro / {user.active_organization?.name}</p><h1>{title}</h1></div>
             </div>
             <div className="admin-topbar__actions">
-              <Link href="/admin/guestbook/search" className="admin-search-link">
+              <Link href="/admin/guestbook/search" className="admin-search-link" onClick={() => beginNavigation('/admin/guestbook/search', 'Guest search')}>
                 <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
                 <span>Find a guest</span><kbd>⌘ K</kbd>
               </Link>
-              <Link href="/admin/follow-ups" className="admin-icon-button" aria-label="View follow-ups">
+              <Link href="/admin/follow-ups" className="admin-icon-button" aria-label="View follow-ups" onClick={() => beginNavigation('/admin/follow-ups', 'Follow-ups')}>
                 <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 6-3 7-3 7h18s-3-1-3-7M10 20h4"/></svg><i />
               </Link>
-              {can('event_manager') && <Link href="/admin/event-management/add" className="admin-create-button"><span>＋</span> New event</Link>}
+              {can('event_manager') && <Link href="/admin/event-management/add" className="admin-create-button" onClick={() => beginNavigation('/admin/event-management/add', 'New event')}><span>＋</span> New event</Link>}
             </div>
           </header>
           <main className="admin-main">{children}</main>

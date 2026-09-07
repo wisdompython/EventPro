@@ -275,7 +275,7 @@ not copy those secrets into source control.
 | `WHATSAPP_APP_SECRET` | Meta app secret | — |
 | `WHATSAPP_VERIFY_TOKEN` | Webhook verification token | `guest_management_verify` |
 | `WHATSAPP_PASS_TEMPLATE` | Approved Meta template name | `event_pass_delivery` |
-| `WHATSAPP_MEDIA_BASE_URL` | Public base URL for pass images | — |
+| `WHATSAPP_MEDIA_BASE_URL` | Optional public base URL for pass images; blank uploads media directly to Meta | — |
 
 ### Frontend (`frontend/.env.local`)
 
@@ -371,7 +371,7 @@ not copy those secrets into source control.
 5. Wait for Meta approval, then register the template in **Admin → Templates** with its parameter mapping
 6. Add your credentials to `.env`
 7. Register your webhook URL: `https://yourdomain.com/api/webhooks/whatsapp/`
-8. Set `WHATSAPP_MEDIA_BASE_URL` to your public domain so Meta can fetch pass images
+8. Optionally set `WHATSAPP_MEDIA_BASE_URL` to your public domain. When it is blank, Event Pro uploads generated image bytes directly to Meta before sending.
 
 > **Note:** Free-form text messages (`send_message`) only work within 24 hours of the guest messaging your business number first (Meta policy). Pass delivery uses approved templates and has no session requirement.
 
@@ -491,7 +491,7 @@ docker compose -f docker-compose.prod.yml exec backend python /tmp/cleanup_past_
 
 - `GUNICORN_WORKERS` — set to `(2 × CPU cores) + 1`. For a 2-core VPS use `5`
 - Media files (passes, QR codes) are stored in a Docker volume — back this up regularly
-- `WHATSAPP_MEDIA_BASE_URL` must be your public domain so Meta can fetch pass images for delivery
+- `WHATSAPP_MEDIA_BASE_URL` is optional. A public domain avoids re-uploading generated media; without one, Event Pro uploads the image directly to Meta.
 
 ---
 

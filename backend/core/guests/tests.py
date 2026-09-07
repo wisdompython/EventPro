@@ -1,4 +1,5 @@
 import io
+import tempfile
 import zipfile
 from unittest.mock import patch
 
@@ -65,6 +66,27 @@ class WhatsAppTemplateVariableTests(TestCase):
             response.data,
         )
 
+    def test_template_library_searches_identity_description_and_body(self):
+        from .models import WhatsAppTemplate
+
+        matching = WhatsAppTemplate.objects.create(
+            name='evening_banquet',
+            display_name='Evening invitation',
+            description='For formal dinner guests',
+            body_text='Welcome to the annual banquet.',
+        )
+        WhatsAppTemplate.objects.create(
+            name='arrival_pass',
+            display_name='Arrival pass',
+            body_text='Your access card is attached.',
+        )
+
+        response = self.client.get('/api/whatsapp-templates/?search=banquet')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], matching.id)
+
 
 class EventDeliveryWorkflowTests(TestCase):
     def setUp(self):
@@ -101,6 +123,70 @@ class EventDeliveryWorkflowTests(TestCase):
         self.assertFalse(RsvpWorkflow.objects.filter(event_id=response.data['id']).exists())
         self.assertIsNone(response.data['rsvp_workflow_id'])
         self.assertFalse(response.data['rsvp_enabled'])
+
+    def test_preferences_event_creates_draft_questions_atomically(self):
+        from .models import GuestRequirement
+
+        response = self.client.post('/api/events/', {
+            'name': 'Preferences Event',
+            'date': (timezone.now() + timezone.timedelta(days=10)).isoformat(),
+            'preferences_enabled': True,
+            'preferences_deadline': (timezone.now() + timezone.timedelta(days=5)).isoformat(),
+            'requirements_setup': [{
+                'key': 'meal_choice',
+                'label': 'Meal choice',
+                'help_text': 'Choose one meal.',
+                'kind': 'choice',
+                'options': ['Jollof rice', 'Fried rice'],
+                'unit': '',
+                'required': True,
+                'applies_to': 'everyone',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        requirement = GuestRequirement.objects.get(event_id=response.data['id'])
+        self.assertEqual(requirement.collect_on, GuestRequirement.CollectOn.PREFERENCES)
+        self.assertEqual(requirement.options, ['Jollof rice', 'Fried rice'])
+        self.assertTrue(requirement.required)
+
+    def test_rsvp_event_creates_questions_on_rsvp_page(self):
+        from .models import GuestRequirement
+
+        response = self.client.post('/api/events/', {
+            'name': 'RSVP Questions Event',
+            'date': (timezone.now() + timezone.timedelta(days=10)).isoformat(),
+            'create_rsvp_workflow': True,
+            'requirements_setup': [{
+                'key': 'transport',
+                'label': 'Shuttle seat',
+                'kind': 'boolean',
+                'options': [],
+                'required': False,
+                'applies_to': 'everyone',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        requirement = GuestRequirement.objects.get(event_id=response.data['id'])
+        self.assertEqual(requirement.collect_on, GuestRequirement.CollectOn.RSVP)
+
+    def test_direct_event_rejects_questions_without_response_form(self):
+        response = self.client.post('/api/events/', {
+            'name': 'No Response Questions Event',
+            'date': (timezone.now() + timezone.timedelta(days=10)).isoformat(),
+            'requirements_setup': [{
+                'key': 'meal_choice',
+                'label': 'Meal choice',
+                'kind': 'choice',
+                'options': ['Jollof rice'],
+                'required': False,
+                'applies_to': 'everyone',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('requirements_setup', response.data)
 
     def test_event_can_enable_plus_ones_and_reports_estimated_guests(self):
         event = make_event(name='Plus One Event', allow_plus_one=True)
@@ -942,6 +1028,28 @@ class SendPassRetryTests(TestCase):
             mock_client.return_value.send_template.side_effect = RuntimeError('boom')
             self.assertFalse(send_pass(self.guest))
 
+    def test_local_pass_image_is_uploaded_to_meta_as_bytes(self):
+        from django.core.files.base import ContentFile
+        from .whatsapp import send_pass
+
+        with tempfile.TemporaryDirectory() as media_root, \
+             self.settings(
+                 MEDIA_ROOT=media_root,
+                 WHATSAPP_TRANSPORT='meta',
+                 WHATSAPP_PHONE_ID='id',
+                 WHATSAPP_TOKEN='tok',
+                 WHATSAPP_MEDIA_BASE_URL='',
+             ), \
+             patch('guests.whatsapp._get_client') as mock_client:
+            self.guest.pass_image.save('local-pass.png', ContentFile(b'local-png-bytes'))
+
+            sent = send_pass(self.guest)
+
+        self.assertTrue(sent)
+        params = mock_client.return_value.send_template.call_args.kwargs['params']
+        self.assertEqual(params[0].media, b'local-png-bytes')
+        self.assertEqual(params[0]._mime_type, 'image/png')
+
     def test_send_whatsapp_pass_task_retries_on_transient_error(self):
         from pywa.errors import WhatsAppError
         from .tasks import send_whatsapp_pass
@@ -1437,6 +1545,7 @@ class GuestPreferencesTests(TestCase):
         self.client = APIClient()
         self.event = make_event(
             preferences_enabled=True,
+            preferences_deadline=timezone.now() + timezone.timedelta(days=3),
             allow_plus_one=True,
             collect_aso_ebi=True,
             collect_celebrant=True,
@@ -1451,6 +1560,42 @@ class GuestPreferencesTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['celebrant_options'], ['Bride', 'Groom'])
         self.assertTrue(response.data['can_respond'])
+        self.assertIsNone(response.data['closed_reason'])
+        self.assertEqual(
+            response.data['preferences_deadline'],
+            self.event.preferences_deadline,
+        )
+
+    def test_preferences_are_available_by_short_public_code(self):
+        response = self.client.get(
+            f'/api/guest-preferences/{self.guest.preference_code}/',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['guest_name'], self.guest.full_name)
+        self.assertEqual(len(self.guest.preference_code), 6)
+
+    def test_preferences_link_uses_branded_short_route(self):
+        from .whatsapp import build_preferences_url
+
+        with self.settings(SITE_URL='https://events.example.com'):
+            url = build_preferences_url(self.guest)
+
+        self.assertEqual(
+            url,
+            f'https://events.example.com/test-event/preferences/test-guest-{self.guest.preference_code}',
+        )
+
+    def test_preferences_close_at_configured_deadline(self):
+        self.event.preferences_deadline = timezone.now() - timezone.timedelta(minutes=1)
+        self.event.save(update_fields=['preferences_deadline'])
+
+        details = self.client.get(self.url)
+        submission = self.client.post(self.url, {}, format='json')
+
+        self.assertFalse(details.data['can_respond'])
+        self.assertEqual(details.data['closed_reason'], 'deadline_passed')
+        self.assertEqual(submission.status_code, status.HTTP_409_CONFLICT)
 
     @patch('guests.tasks.generate_guest_assets.delay')
     def test_preferences_form_saves_planning_choices_without_rsvp(self, mock_assets):

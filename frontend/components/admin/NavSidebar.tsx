@@ -7,9 +7,15 @@ import { useAuth } from '@/lib/auth'
 import { ADMIN_NAV, NavIcon } from './AdminNavigation'
 import { OrganizationSwitcher } from './OrganizationSwitcher'
 
-interface Props { user: AuthUser; logout: () => void; onCollapse: () => void }
+interface Props {
+  user: AuthUser
+  logout: () => void
+  onCollapse: () => void
+  pendingHref: string | null
+  onNavigate: (href: string, label: string) => void
+}
 
-export function NavSidebar({ user, logout, onCollapse }: Props) {
+export function NavSidebar({ user, logout, onCollapse, pendingHref, onNavigate }: Props) {
   const pathname = usePathname()
   const { can } = useAuth()
   const initial = (user.first_name?.[0] || user.username[0]).toUpperCase()
@@ -18,7 +24,7 @@ export function NavSidebar({ user, logout, onCollapse }: Props) {
   return (
     <aside className="admin-sidebar">
       <div className="admin-sidebar__brand">
-        <Link href="/admin/today"><span>EP</span><div><b>Event Pro</b><small>Host operations</small></div></Link>
+        <Link href="/admin/today" onClick={() => onNavigate('/admin/today', 'Today')}><span>EP</span><div><b>Event Pro</b><small>Host operations</small></div></Link>
         <button type="button" className="admin-sidebar__collapse" onClick={onCollapse} aria-label="Collapse navigation" title="Collapse navigation">
           <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.9" viewBox="0 0 24 24" aria-hidden="true">
             <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -43,11 +49,19 @@ export function NavSidebar({ user, logout, onCollapse }: Props) {
               <p>{section.label}</p>
               {visible.map((item) => {
                 const active = pathname === item.href || (item.href !== '/admin/today' && pathname.startsWith(`${item.href}/`))
+                const pending = pendingHref === item.href
                 return (
-                  <Link key={item.href} href={item.href} data-tour={item.tourId} className={active ? 'is-active' : ''}>
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    data-tour={item.tourId}
+                    className={`${active ? 'is-active' : ''}${pending ? ' is-pending' : ''}`}
+                    onClick={() => onNavigate(item.href, item.label)}
+                    aria-busy={pending || undefined}
+                  >
                     <NavIcon name={item.icon} />
                     <span>{item.label}</span>
-                    {active && <i />}
+                    {pending ? <i className="admin-nav-spinner" aria-hidden="true" /> : active && <i className="admin-nav-current" />}
                   </Link>
                 )
               })}
@@ -58,7 +72,7 @@ export function NavSidebar({ user, logout, onCollapse }: Props) {
 
       <div className="admin-sidebar__status"><i /><span><b>Ready for guests</b><small>Messaging and doors online</small></span></div>
       <div className="admin-user-card">
-        <Link href="/admin/profile"><span>{initial}</span><div><b>{displayName}</b><small>{user.membership_role_display ?? user.role_display}</small></div></Link>
+        <Link href="/admin/profile" onClick={() => onNavigate('/admin/profile', 'My account')}><span>{initial}</span><div><b>{displayName}</b><small>{user.membership_role_display ?? user.role_display}</small></div></Link>
         <button onClick={logout} aria-label="Sign out" title="Sign out">
           <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
         </button>

@@ -7,6 +7,7 @@ from guests.whatsapp import (
     _build_pass_url,
     _format_ordinal_date,
     _get_client,
+    _image_header_params,
     _normalise_phone,
     _resolve_template_params,
 )
@@ -32,9 +33,11 @@ def build_rsvp_url(recipient) -> str:
 def _build_invitation_image_url(recipient) -> str:
     base = getattr(settings, 'WHATSAPP_MEDIA_BASE_URL', '')
     if not base:
-        host = settings.ALLOWED_HOSTS[0] if settings.ALLOWED_HOSTS else 'localhost:8000'
-        scheme = 'https' if not settings.DEBUG else 'http'
-        base = f'{scheme}://{host}'
+        if settings.DEBUG:
+            base = 'http://localhost:8000'
+        else:
+            host = settings.ALLOWED_HOSTS[0] if settings.ALLOWED_HOSTS else ''
+            base = f'https://{host}' if host else ''
     return f"{base.rstrip('/')}{settings.MEDIA_URL}{recipient.invitation_image.name}"
 
 
@@ -87,7 +90,7 @@ def send_invitation(recipient):
     if workflow.invitation_design and not template.has_header_image:
         raise ValueError('Select an RSVP template with an image header for this artwork.')
 
-    from pywa.types.templates import BodyText, HeaderImage, TemplateLanguage
+    from pywa.types.templates import BodyText, TemplateLanguage
 
     params = []
     if workflow.invitation_design:
@@ -95,10 +98,10 @@ def send_invitation(recipient):
 
         if not generate_invitation_image(recipient):
             raise ValueError('The personalised RSVP artwork could not be generated.')
-        image_url = _build_invitation_image_url(recipient)
-        if 'localhost' in image_url or '127.0.0.1' in image_url:
-            raise ValueError('The RSVP artwork does not have a public URL.')
-        params.append(HeaderImage.params(image=image_url))
+        params.append(_image_header_params(
+            recipient.invitation_image,
+            _build_invitation_image_url(recipient),
+        ))
     body_values = _resolve_invitation_params(recipient)
     if body_values:
         params.append(BodyText.params(*body_values))
@@ -146,14 +149,11 @@ def send_configured_pass(recipient):
         body_values = [guest.full_name, event.name if event else 'the event']
         has_header_image = True
 
-    from pywa.types.templates import BodyText, HeaderImage, TemplateLanguage
+    from pywa.types.templates import BodyText, TemplateLanguage
 
     params = []
     if has_header_image:
-        pass_url = _build_pass_url(guest)
-        if not pass_url or 'localhost' in pass_url or '127.0.0.1' in pass_url:
-            raise ValueError('The guest pass image does not have a public URL.')
-        params.append(HeaderImage.params(image=pass_url))
+        params.append(_image_header_params(guest.pass_image, _build_pass_url(guest)))
 
     if body_values:
         params.append(BodyText.params(*body_values))

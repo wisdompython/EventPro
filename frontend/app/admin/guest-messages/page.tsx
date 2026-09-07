@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { api, Guest, Event } from '@/lib/api'
+import { useState, useEffect, useMemo } from 'react'
+import { api, Guest, Event, SeatingSection } from '@/lib/api'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import './guest-messages.css'
 
 function showInitials(name: string) {
   return name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
@@ -182,8 +184,9 @@ function ResendModal({ guest, onConfirm, onClose }: { guest: Guest; onConfirm: (
 }
 
 // ── Guest row ────────────────────────────────────────────────────────────────
-function GuestRow({ guest, onSend, onMessage, sending, polling }: {
+function GuestRow({ guest, seatingArea, onSend, onMessage, sending, polling }: {
   guest: Guest
+  seatingArea: string
   onSend: (g: Guest) => void
   onMessage: (g: Guest) => void
   sending: string | null
@@ -197,59 +200,22 @@ function GuestRow({ guest, onSend, onMessage, sending, polling }: {
     onSend(guest)
   }
 
-  return (
-    <>
-      {showResend && (
-        <ResendModal guest={guest} onClose={() => setShowResend(false)}
-          onConfirm={() => { setShowResend(false); onSend(guest) }} />
-      )}
-      <div className="flex items-center gap-3 px-5 py-3.5 transition hover:bg-[var(--chip)]"
-        style={{ borderBottom: '1px solid var(--line)' }}>
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
-          style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
-          {showInitials(guest.full_name)}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold truncate" style={{ color: 'var(--ink)' }}>{guest.full_name}</p>
-          <p className="text-xs font-mono" style={{ color: 'var(--muted-2)' }}>{guest.phone_number}</p>
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {isPolling ? (
-            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--muted)' }}>
-              <span className="inline-block h-3 w-3 rounded-full border-2 border-t-transparent animate-spin"
-                style={{ borderColor: 'var(--muted) transparent var(--muted) var(--muted)' }} />
-              Delivering…
-            </span>
-          ) : guest.whatsapp_sent ? (
-            <span className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--brand)' }}>
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--brand)' }} />
-              Sent {guest.whatsapp_sent_at ? new Date(guest.whatsapp_sent_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''}
-            </span>
-          ) : (
-            <span className="text-[11px]" style={{ color: 'var(--muted-2)' }}>Not sent</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <button onClick={handleSendClick} disabled={sending === guest.id || isPolling}
-            className="rounded-full px-3 py-1.5 text-[11px] font-semibold transition disabled:opacity-50"
-            style={{
-              background: guest.whatsapp_sent ? 'transparent' : 'var(--brand)',
-              color: guest.whatsapp_sent ? 'var(--muted)' : '#fff',
-              border: guest.whatsapp_sent ? '1px solid var(--line)' : 'none',
-            }}>
-            {sending === guest.id ? '…' : guest.whatsapp_sent ? 'Resend' : 'Send Pass'}
-          </button>
-          <button onClick={() => onMessage(guest)} title="Send message"
-            className="rounded-full p-1.5 transition hover:bg-[var(--chip)]"
-            style={{ color: 'var(--muted)' }}>
-            <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-          </button>
-        </div>
+  return <>
+    {showResend && <ResendModal guest={guest} onClose={() => setShowResend(false)} onConfirm={() => { setShowResend(false); onSend(guest) }} />}
+    <div className="gm-guest-row">
+      <div className="gm-guest-identity"><div className="gm-avatar">{showInitials(guest.full_name)}</div><div className="min-w-0"><p className="truncate text-sm font-semibold text-[var(--ink)]">{guest.full_name}</p><p className="mt-0.5 truncate text-xs text-[var(--muted)]">{guest.phone_number || 'No phone number'}</p></div></div>
+      <div className="gm-row-detail"><span className="gm-detail-label">Access</span><strong>{guest.ticket_type || 'General'}</strong></div>
+      <div className="gm-row-detail"><span className="gm-detail-label">Seating</span><strong>{guest.table_number ? `${seatingArea ? `${seatingArea} · ` : ''}${guest.table_number}${guest.seat_number ? ` / ${guest.seat_number}` : ''}` : 'Unassigned'}</strong></div>
+      <div className="gm-row-detail"><span className="gm-detail-label">Arrival</span><span className={`gm-mini-status ${guest.status === 'checked_in' ? 'is-positive' : ''}`}>{guest.status === 'checked_in' ? 'Checked in' : 'Expected'}</span></div>
+      <div className="gm-delivery-cell">
+        {isPolling ? <span className="gm-delivery-status is-delivering"><i className="gm-spinner" />Delivering…</span> : guest.whatsapp_sent ? <span className="gm-delivery-status is-sent"><i />Sent {guest.whatsapp_sent_at ? new Date(guest.whatsapp_sent_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''}</span> : <span className="gm-delivery-status is-pending"><i />Not sent</span>}
       </div>
-    </>
-  )
+      <div className="gm-row-actions">
+        <button onClick={handleSendClick} disabled={sending === guest.id || isPolling} className={`gm-send-button ${guest.whatsapp_sent ? 'is-secondary' : ''}`}>{sending === guest.id ? '…' : guest.whatsapp_sent ? 'Resend' : 'Send pass'}</button>
+        <button onClick={() => onMessage(guest)} title="Send a direct message" className="gm-message-button"><svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
+      </div>
+    </div>
+  </>
 }
 
 const PAGE_SIZE = 50
@@ -261,11 +227,18 @@ export default function WhatsAppPage() {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
   const [guests, setGuests] = useState<Guest[]>([])
   const [count, setCount] = useState(0)
-  const [waSent, setWaSent] = useState(0)
-  const [waUnsent, setWaUnsent] = useState(0)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [eventSearch, setEventSearch] = useState('')
   const [waFilter, setWaFilter] = useState<'all' | 'sent' | 'unsent'>('all')
+  const [ticketFilter, setTicketFilter] = useState('')
+  const [attendanceFilter, setAttendanceFilter] = useState('')
+  const [areaFilter, setAreaFilter] = useState('')
+  const [tableFilter, setTableFilter] = useState('')
+  const [ordering, setOrdering] = useState('-registered')
+  const [seatingSections, setSeatingSections] = useState<SeatingSection[]>([])
+  const [eventStats, setEventStats] = useState({ total: 0, sent: 0, unsent: 0 })
   const [guestsLoading, setGuestsLoading] = useState(false)
   const [sending, setSending] = useState<string | null>(null)
   const [polling, setPolling] = useState<Set<string>>(new Set())
@@ -275,18 +248,44 @@ export default function WhatsAppPage() {
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE))
+  const tableToArea = useMemo(() => new Map(seatingSections.flatMap((section) => section.tables.map((table) => [table.label, section.name] as const))), [seatingSections])
+  const selectedAreaTables = areaFilter ? seatingSections.find((section) => section.name === areaFilter)?.tables ?? [] : seatingSections.flatMap((section) => section.tables)
+  const activeFilterCount = [waFilter !== 'all', ticketFilter, attendanceFilter, areaFilter, tableFilter, debouncedSearch].filter(Boolean).length
+  const deliveryPercent = eventStats.total ? Math.round((eventStats.sent / eventStats.total) * 100) : 0
 
   useEffect(() => {
-    api.getEvents().then(setEvents).catch(console.error).finally(() => setEventsLoading(false))
+    api.getEvents().then((items) => {
+      setEvents(items)
+      const eventId = Number(new URLSearchParams(window.location.search).get('event'))
+      if (eventId) setSelectedEvent(items.find((item) => item.id === eventId) ?? null)
+    }).catch(console.error).finally(() => setEventsLoading(false))
   }, [])
 
-  useEffect(() => { setPage(1) }, [selectedEvent?.id, search, waFilter])
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => {
+    setSeatingSections([])
+    setEventStats({ total: 0, sent: 0, unsent: 0 })
+    if (!selectedEvent) return
+    api.getSeatingSections(selectedEvent.id).then((items) => setSeatingSections(items.filter((item) => item.kind === 'tables'))).catch(() => setSeatingSections([]))
+    api.getGuests({ event: String(selectedEvent.id), page: '1', has_phone: '1' }).then((data) => setEventStats({ total: data.count, sent: data.stats?.wa_sent ?? 0, unsent: data.stats?.wa_unsent ?? 0 })).catch(console.error)
+  }, [selectedEvent?.id])
+
+  useEffect(() => { setPage(1) }, [selectedEvent?.id, debouncedSearch, waFilter, ticketFilter, attendanceFilter, areaFilter, tableFilter, ordering])
 
   function buildParams() {
     const params: Record<string, string> = { event: String(selectedEvent!.id), page: String(page), has_phone: '1' }
-    if (search.trim()) params.search = search.trim()
+    if (debouncedSearch) params.search = debouncedSearch
     if (waFilter === 'sent') params.wa_sent = 'true'
     else if (waFilter === 'unsent') params.wa_sent = 'false'
+    if (ticketFilter) params.ticket_type = ticketFilter
+    if (attendanceFilter) params.status = attendanceFilter
+    if (areaFilter) params.seating_area = areaFilter
+    if (tableFilter) params.table_number = tableFilter
+    if (ordering) params.ordering = ordering
     return params
   }
 
@@ -297,12 +296,10 @@ export default function WhatsAppPage() {
       .then((d) => {
         setGuests(d.results)
         setCount(d.count)
-        setWaSent(d.stats?.wa_sent ?? 0)
-        setWaUnsent(d.stats?.wa_unsent ?? 0)
       })
       .catch(console.error)
       .finally(() => setGuestsLoading(false))
-  }, [selectedEvent, page, search, waFilter])
+  }, [selectedEvent, page, debouncedSearch, waFilter, ticketFilter, attendanceFilter, areaFilter, tableFilter, ordering])
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok })
@@ -315,10 +312,22 @@ export default function WhatsAppPage() {
       .then((d) => {
         setGuests(d.results)
         setCount(d.count)
-        setWaSent(d.stats?.wa_sent ?? 0)
-        setWaUnsent(d.stats?.wa_unsent ?? 0)
       })
       .catch(console.error)
+    api.getGuests({ event: String(selectedEvent.id), page: '1', has_phone: '1' })
+      .then((data) => setEventStats({ total: data.count, sent: data.stats?.wa_sent ?? 0, unsent: data.stats?.wa_unsent ?? 0 }))
+      .catch(console.error)
+  }
+
+  function clearFilters() {
+    setSearch('')
+    setDebouncedSearch('')
+    setWaFilter('all')
+    setTicketFilter('')
+    setAttendanceFilter('')
+    setAreaFilter('')
+    setTableFilter('')
+    setOrdering('-registered')
   }
 
   async function handleSend(guest: Guest) {
@@ -363,260 +372,55 @@ export default function WhatsAppPage() {
     } finally { setBulkSending(false) }
   }
 
-  const sent   = waSent
-  const unsent = waUnsent
+  const sent = eventStats.sent
+  const unsent = eventStats.unsent
+  const filteredEvents = events.filter((event) => `${event.name} ${event.venue}`.toLowerCase().includes(eventSearch.toLowerCase()))
 
-  // ── Event picker ────────────────────────────────────────────────────────
-  if (!selectedEvent) {
-    return (
-      <div className="admin-legacy-workspace flex h-screen flex-col overflow-hidden" style={{ background: 'var(--bg)' }}>
-        {toast && <Toast {...toast} />}
-        <div className="flex flex-shrink-0 items-center justify-between px-6 py-4"
-          style={{ borderBottom: '1px solid var(--line)', background: 'var(--sidebar)' }}>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--brand)' }}>Guest contact</p>
-            <h1 data-tour="whatsapp-title" className="text-xl font-bold mt-0.5" style={{ color: 'var(--ink)' }}>Guest messages</h1>
-          </div>
-          <a href="/admin/event-management/add"
-            className="rounded-full px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
-            style={{ background: 'var(--brand)' }}>+ New Event</a>
+  if (!selectedEvent) return <div className="admin-page gm-page">
+    {toast && <Toast {...toast} />}
+    <AdminPageHeader eyebrow="Guest contact" title="Guest messages" description="Choose an event, review delivery coverage and send personalized passes through WhatsApp." actions={<a href="/admin/event-management/add" className="admin-primary-action">+ New event</a>} />
+    <section className="gm-event-browser">
+      <div className="gm-section-heading"><div><span>Events</span><h2>Select a guest list</h2></div><div className="gm-search"><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input data-tour="whatsapp-title" value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} placeholder="Search events or venues…" /></div></div>
+      {eventsLoading ? <div className="gm-loading">Loading events…</div> : filteredEvents.length === 0 ? <div className="gm-empty"><strong>{events.length ? 'No matching events' : 'No events yet'}</strong><p>{events.length ? 'Try a different search.' : 'Create an event before sending guest passes.'}</p>{!events.length && <a href="/admin/event-management/add" className="admin-primary-action">Create event</a>}</div> : <div data-tour="whatsapp-event-table" className="gm-event-grid">{filteredEvents.map((event) => <button key={event.id} onClick={() => { setSelectedEvent(event); clearFilters() }} className="gm-event-card"><div className="gm-event-card__top"><span className={`gm-event-icon ${event.is_ended ? 'is-muted' : ''}`}>{new Date(event.date).toLocaleDateString('en-GB', { day: '2-digit' })}</span><span className={`gm-event-state ${event.whatsapp_enabled ? 'is-live' : ''}`}>{event.is_ended ? 'Ended' : event.whatsapp_enabled ? 'WhatsApp on' : 'Manual delivery'}</span></div><h3>{event.name}</h3><p>{new Date(event.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}{event.venue ? ` · ${event.venue}` : ''}</p><div className="gm-event-card__footer"><span><strong>{event.guest_count}</strong> guests</span><span>Open workspace →</span></div></button>)}</div>}
+    </section>
+  </div>
+
+  return <div className="admin-page gm-page">
+    {toast && <Toast {...toast} />}
+    {messageGuest && <MessageModal guest={messageGuest} onClose={() => setMessageGuest(null)} />}
+    {bulkModal && <BulkSendModal guests={guests} resend={bulkModal.resend} totalCount={eventStats.total} unsentCount={eventStats.unsent} onConfirm={() => handleBulkSend(bulkModal.resend)} onClose={() => setBulkModal(null)} />}
+
+    <AdminPageHeader eyebrow="Guest contact" title={selectedEvent.name} description={`${new Date(selectedEvent.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}${selectedEvent.venue ? ` · ${selectedEvent.venue}` : ''}`} actions={<><button onClick={() => { setSelectedEvent(null); setGuests([]); setCount(0); clearFilters() }} className="admin-secondary-action">Change event</button>{unsent > 0 && <button data-tour="whatsapp-bulk-actions" onClick={() => setBulkModal({ resend: false })} disabled={bulkSending} className="admin-primary-action">{bulkSending ? 'Queueing…' : `Send ${unsent} pending`}</button>}</>} />
+
+    <section className="gm-overview">
+      <div className="gm-progress-card"><div className="gm-progress-card__copy"><span>Delivery coverage</span><strong>{deliveryPercent}%</strong><p>{eventStats.sent} of {eventStats.total} reachable guests have received their pass.</p></div><div className="gm-progress-track"><i style={{ width: `${deliveryPercent}%` }} /></div></div>
+      <div className="gm-stat-card is-sent"><span>Delivered</span><strong>{sent}</strong><p>Pass sent successfully</p></div>
+      <div className="gm-stat-card is-pending"><span>Pending</span><strong>{unsent}</strong><p>Still needs a pass</p></div>
+      <div className="gm-stat-card"><span>Reachable</span><strong>{eventStats.total}</strong><p>Guests with phone numbers</p></div>
+    </section>
+
+    <section className="gm-workspace">
+      <div className="gm-toolbar">
+        <div className="gm-toolbar__top"><div><span>Recipients</span><h2>Delivery list</h2><p>{count} result{count === 1 ? '' : 's'}{activeFilterCount ? ` · ${activeFilterCount} active filter${activeFilterCount === 1 ? '' : 's'}` : ''}</p></div><div className="gm-toolbar__actions"><button onClick={() => setBulkModal({ resend: true })} disabled={bulkSending || eventStats.total === 0} className="admin-secondary-action">Resend all</button><a href={`/admin/list-import?event=${selectedEvent.id}`} className="admin-secondary-action">Import guests</a></div></div>
+        <div className="gm-filter-row">
+          <label className="gm-search gm-search--wide"><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search guest name or phone…" /></label>
+          <select aria-label="Ticket type" value={ticketFilter} onChange={(event) => setTicketFilter(event.target.value)}><option value="">All ticket types</option>{selectedEvent.ticket_types.map((ticket) => <option key={ticket.value} value={ticket.value}>{ticket.label}</option>)}</select>
+          <select aria-label="Arrival status" value={attendanceFilter} onChange={(event) => setAttendanceFilter(event.target.value)}><option value="">Any arrival status</option><option value="registered">Expected</option><option value="checked_in">Checked in</option></select>
+          <select aria-label="Sort guests" value={ordering} onChange={(event) => setOrdering(event.target.value)}><option value="-registered">Newest added</option><option value="registered">Oldest added</option><option value="name">Name A–Z</option><option value="-name">Name Z–A</option></select>
         </div>
-
-        <div className="flex-1 overflow-auto">
-          {eventsLoading ? (
-            <div className="py-16 text-center text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>
-          ) : events.length === 0 ? (
-            <div className="flex flex-col items-center gap-4 py-20">
-              <p className="text-sm" style={{ color: 'var(--muted)' }}>No events yet.</p>
-              <a href="/admin/event-management/add"
-                className="rounded-full px-5 py-2 text-xs font-semibold text-white"
-                style={{ background: 'var(--brand)' }}>+ Create an event</a>
-            </div>
-          ) : (
-            <table data-tour="whatsapp-event-table" className="w-full text-sm">
-              <thead>
-                <tr className="text-xs font-semibold uppercase tracking-widest"
-                  style={{ borderBottom: '1px solid var(--line)', color: 'var(--muted-2)', background: 'var(--panel)' }}>
-                  <th className="px-6 py-3 text-left">Event</th>
-                  <th className="px-6 py-3 text-left">Date</th>
-                  <th className="px-6 py-3 text-left">Venue</th>
-                  <th className="px-6 py-3 text-left">Guests</th>
-                  <th className="px-6 py-3 text-left">WA Sent</th>
-                  <th className="px-6 py-3 text-left w-8" />
-                </tr>
-              </thead>
-              <tbody>
-                {events.map((ev) => (
-                  <tr key={ev.id}
-                    className="group cursor-pointer transition-colors hover:bg-[var(--panel)]"
-                    style={{ borderBottom: '1px solid var(--line)' }}
-                    onClick={() => setSelectedEvent(ev)}>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold" style={{ color: 'var(--ink)' }}>{ev.name}</span>
-                        {ev.is_ended && (
-                          <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                            style={{ background: 'rgba(156,163,175,0.15)', color: 'var(--muted)' }}>Ended</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-xs" style={{ color: 'var(--muted)' }}>
-                      {new Date(ev.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </td>
-                    <td className="max-w-[160px] truncate px-6 py-4 text-xs" style={{ color: 'var(--muted)' }}>
-                      {ev.venue || '—'}
-                    </td>
-                    <td className="px-6 py-4 text-xs font-semibold" style={{ color: 'var(--ink)' }}>
-                      {ev.guest_count}
-                    </td>
-                    <td className="px-6 py-4">
-                      {ev.guest_count > 0 ? (
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-20 rounded-full overflow-hidden" style={{ background: 'var(--line)' }}>
-                            <div className="h-full rounded-full transition-all"
-                              style={{ background: 'var(--brand)', width: `${Math.round((ev.checked_in_count / ev.guest_count) * 100)}%` }} />
-                          </div>
-                          <span className="text-xs whitespace-nowrap" style={{ color: 'var(--muted)' }}>
-                            {ev.checked_in_count}/{ev.guest_count}
-                          </span>
-                        </div>
-                      ) : <span className="text-xs" style={{ color: 'var(--muted-2)' }}>—</span>}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ color: 'var(--brand)' }}>Open →</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  // ── Guest list for event ─────────────────────────────────────────────────
-  return (
-    <div className="admin-legacy-workspace flex h-screen flex-col overflow-hidden" style={{ background: 'var(--bg)' }}>
-      {toast && <Toast {...toast} />}
-      {messageGuest && <MessageModal guest={messageGuest} onClose={() => setMessageGuest(null)} />}
-      {bulkModal && (
-        <BulkSendModal
-          guests={guests} resend={bulkModal.resend}
-          totalCount={count} unsentCount={waUnsent}
-          onConfirm={() => handleBulkSend(bulkModal.resend)}
-          onClose={() => setBulkModal(null)}
-        />
-      )}
-
-      {/* Header */}
-      <div className="flex flex-shrink-0 items-center justify-between px-6 py-4"
-        style={{ borderBottom: '1px solid var(--line)', background: 'var(--sidebar)' }}>
-        <div className="flex items-center gap-3">
-          <button onClick={() => { setSelectedEvent(null); setGuests([]); setCount(0); setPage(1); setSearch(''); setWaFilter('all') }}
-            className="text-xs font-semibold transition hover:opacity-70" style={{ color: 'var(--muted)' }}>
-            ← Event management
-          </button>
-          <span style={{ color: 'var(--line)' }}>/</span>
-          <div>
-            <h1 className="text-lg font-bold" style={{ color: 'var(--ink)' }}>{selectedEvent.name}</h1>
-          </div>
-        </div>
-
-        {/* Stats + bulk actions */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--muted)' }}>
-            <span><span className="font-bold" style={{ color: 'var(--ink)' }}>{sent}</span> sent</span>
-            <span><span className="font-bold" style={{ color: 'var(--ink)' }}>{unsent}</span> pending</span>
-            <span><span className="font-bold" style={{ color: 'var(--ink)' }}>{count}</span> total</span>
-          </div>
-          <div data-tour="whatsapp-bulk-actions" className="flex items-center gap-2">
-            {unsent > 0 && (
-              <button onClick={() => setBulkModal({ resend: false })} disabled={bulkSending}
-                className="rounded-full px-4 py-2 text-xs font-semibold text-white transition disabled:opacity-60"
-                style={{ background: 'var(--brand)' }}>
-                {bulkSending ? 'Sending…' : `Send to ${unsent} unsent`}
-              </button>
-            )}
-            <button onClick={() => setBulkModal({ resend: true })} disabled={bulkSending}
-              className="rounded-full px-4 py-2 text-xs font-semibold transition disabled:opacity-60"
-              style={{ border: '1px solid var(--line)', color: 'var(--muted)' }}>
-              Resend all
-            </button>
-          </div>
+        <div className="gm-filter-row gm-filter-row--secondary">
+          <div className="gm-segmented" aria-label="Delivery status">{(['all', 'unsent', 'sent'] as const).map((filter) => <button key={filter} onClick={() => setWaFilter(filter)} className={waFilter === filter ? 'is-active' : ''}>{filter === 'all' ? `All ${eventStats.total}` : filter === 'unsent' ? `Pending ${eventStats.unsent}` : `Delivered ${eventStats.sent}`}</button>)}</div>
+          {seatingSections.length > 0 && <><select aria-label="Seating area" value={areaFilter} onChange={(event) => { setAreaFilter(event.target.value); setTableFilter('') }}><option value="">All seating areas</option>{seatingSections.map((section) => <option key={section.id} value={section.name}>{section.name}</option>)}</select><select aria-label="Table" value={tableFilter} onChange={(event) => setTableFilter(event.target.value)}><option value="">All tables</option>{!areaFilter && <option value="__unassigned__">Unassigned guests</option>}{selectedAreaTables.map((table) => <option key={table.id} value={table.label}>{table.label}</option>)}</select></>}
+          {activeFilterCount > 0 && <button onClick={clearFilters} className="gm-clear-filters">Clear filters ×</button>}
         </div>
       </div>
 
-      {/* Search + filter */}
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 px-6 py-2.5"
-        style={{ borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name or phone…"
-          className="min-w-[200px] flex-1 px-3 py-1.5 text-xs focus:outline-none"
-          style={{ border: '1px solid var(--line)', background: 'var(--panel-2)', color: 'var(--ink)' }}
-        />
-        <div className="flex items-center gap-1">
-          {(['all', 'sent', 'unsent'] as const).map((f) => (
-            <button key={f} onClick={() => setWaFilter(f)}
-              className="px-2.5 py-1.5 text-xs font-semibold transition"
-              style={{
-                border: '1px solid var(--line)',
-                background: waFilter === f ? 'var(--brand)' : 'var(--panel-2)',
-                color: waFilter === f ? '#fff' : 'var(--muted)',
-              }}>
-              {f === 'all' ? 'All' : f === 'sent' ? 'Sent' : 'Unsent'}
-            </button>
-          ))}
-        </div>
-        {(search || waFilter !== 'all') && (
-          <button onClick={() => { setSearch(''); setWaFilter('all') }}
-            className="px-2 py-1.5 text-xs font-semibold transition hover:opacity-70"
-            style={{ color: 'var(--muted)' }}>
-            Clear
-          </button>
-        )}
+      <div className="gm-list-heading"><span>Guest</span><span>Access</span><span>Table & seat</span><span>Arrival</span><span>Delivery</span><span>Actions</span></div>
+      <div className="gm-list">
+        {guestsLoading ? <div className="gm-loading"><i className="gm-spinner" /> Loading recipients…</div> : guests.length === 0 ? <div className="gm-empty"><strong>{activeFilterCount ? 'No recipients match these filters' : 'No guests with phone numbers'}</strong><p>{activeFilterCount ? 'Clear one or more filters to broaden the result.' : 'Add phone numbers before sending WhatsApp passes.'}</p>{activeFilterCount > 0 ? <button onClick={clearFilters} className="admin-secondary-action">Clear filters</button> : <a href={`/admin/list-import?event=${selectedEvent.id}`} className="admin-primary-action">Import guests</a>}</div> : guests.map((guest) => <GuestRow key={guest.id} guest={guest} seatingArea={tableToArea.get(guest.table_number) ?? ''} sending={sending} polling={polling} onSend={handleSend} onMessage={setMessageGuest} />)}
       </div>
 
-      {/* Guest list */}
-      <div className="flex-1 overflow-auto">
-        {guestsLoading ? (
-          <div className="py-16 text-center text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>
-        ) : guests.length === 0 ? (
-          <div className="py-20 flex flex-col items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'var(--panel)' }}>
-              <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" style={{ color: 'var(--muted)' }}>
-                <path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.8 19.8 0 0 1 3.08 5.18 2 2 0 0 1 5.06 3h3a2 2 0 0 1 2 1.72c.128.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.09 10.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.8 12.8 0 0 0 2.81.7A2 2 0 0 1 23 17l-.08.08v-.16z"/>
-              </svg>
-            </div>
-            <div className="text-center">
-              <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>No guests with phone numbers</p>
-              <p className="mt-1 text-xs max-w-xs" style={{ color: 'var(--muted)' }}>
-                Add phone numbers to guests for this event to send WhatsApp passes.
-              </p>
-            </div>
-            <a href={`/admin/list-import?event=${selectedEvent?.id}`}
-              className="rounded-full px-5 py-2 text-xs font-semibold transition"
-              style={{ border: '1px solid var(--line)', color: 'var(--ink)', background: 'var(--panel-2)' }}>
-              Bulk upload guests
-            </a>
-          </div>
-        ) : (
-          <div>
-            {guests.map((g) => (
-              <GuestRow key={g.id} guest={g} sending={sending} polling={polling}
-                onSend={handleSend} onMessage={setMessageGuest} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex flex-shrink-0 items-center justify-between px-5 py-3"
-          style={{ borderTop: '1px solid var(--line)', background: 'var(--sidebar)' }}>
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>
-            Page {page} of {totalPages} · {count} guests
-          </p>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setPage(1)} disabled={page === 1}
-              className="rounded px-2 py-1 text-xs transition disabled:opacity-30"
-              style={{ color: 'var(--muted)', border: '1px solid var(--line)' }}>«</button>
-            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
-              className="rounded px-2.5 py-1 text-xs transition disabled:opacity-30"
-              style={{ color: 'var(--muted)', border: '1px solid var(--line)' }}>‹ Prev</button>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
-              .reduce<(number | '…')[]>((acc, p, idx, arr) => {
-                if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push('…')
-                acc.push(p)
-                return acc
-              }, [])
-              .map((p, i) => p === '…' ? (
-                <span key={`e-${i}`} className="px-1 text-xs" style={{ color: 'var(--muted-2)' }}>…</span>
-              ) : (
-                <button key={p} onClick={() => setPage(p as number)}
-                  className="min-w-[28px] rounded px-2 py-1 text-xs font-semibold transition"
-                  style={{
-                    background: page === p ? 'var(--brand)' : 'transparent',
-                    color: page === p ? '#fff' : 'var(--muted)',
-                    border: `1px solid ${page === p ? 'var(--brand)' : 'var(--line)'}`,
-                  }}>{p}</button>
-              ))}
-
-            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-              className="rounded px-2.5 py-1 text-xs transition disabled:opacity-30"
-              style={{ color: 'var(--muted)', border: '1px solid var(--line)' }}>Next ›</button>
-            <button onClick={() => setPage(totalPages)} disabled={page === totalPages}
-              className="rounded px-2 py-1 text-xs transition disabled:opacity-30"
-              style={{ color: 'var(--muted)', border: '1px solid var(--line)' }}>»</button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+      {totalPages > 1 && <div className="gm-pagination"><p>Showing page {page} of {totalPages} · {count} recipients</p><div><button onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1}>← Previous</button><span>{page}</span><button onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page === totalPages}>Next →</button></div></div>}
+    </section>
+  </div>
 }

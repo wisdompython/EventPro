@@ -1,6 +1,15 @@
+import secrets
 import uuid
 from django.db import models
 from accounts.models import get_default_organization_id
+
+
+PREFERENCE_CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+
+
+def generate_preference_code():
+    """Return a compact, URL-safe, non-sequential preferences access code."""
+    return ''.join(secrets.choice(PREFERENCE_CODE_ALPHABET) for _ in range(6))
 
 
 class Font(models.Model):
@@ -141,6 +150,11 @@ class Event(models.Model):
         default=False,
         help_text='Collect guest preferences without requiring RSVP confirmation.',
     )
+    preferences_deadline = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='Last time guests may submit the standalone preferences form.',
+    )
     collect_celebrant = models.BooleanField(
         default=False,
         help_text='Ask guests which celebrant they are attending for.',
@@ -222,6 +236,12 @@ class Guest(models.Model):
     aso_ebi_quantity = models.PositiveIntegerField(default=0)
     plus_one_attending = models.BooleanField(default=False)
     celebrant_name = models.CharField(max_length=255, blank=True)
+    preference_code = models.CharField(
+        max_length=6,
+        default=generate_preference_code,
+        unique=True,
+        editable=False,
+    )
     preference_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     preferences_submitted_at = models.DateTimeField(null=True, blank=True)
     plus_one_checked_in = models.BooleanField(default=False)

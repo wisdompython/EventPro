@@ -10,6 +10,8 @@ direct ``Guest.objects.update()``, so when seating becomes its own service the
 call becomes an HTTP PATCH and no caller changes.
 """
 
+import re
+
 from django.db.models import Count
 
 from ..models import Guest, SeatingSection, SeatingTable
@@ -53,6 +55,55 @@ def unseated_guests(event_id: int, limit: int = 200):
 
 class SeatingCapacityError(ValueError):
     """A seating assignment would exceed the table's numbered seats."""
+
+
+def _derived_prefix(name: str) -> str:
+    parts = [part for part in re.split(r'[^A-Za-z0-9]+', name) if len(part) > 1]
+    if len(parts) >= 2:
+        return ''.join(part[0] for part in parts[:3]).upper()
+    return (parts[0][:3] if parts else 'S').upper()
+
+
+def create_initial_seating_setup(event, areas: list[dict]) -> list[SeatingSection]:
+    """Create the optional table areas supplied by the event wizard."""
+    created = []
+    used_prefixes: set[str] = set()
+    for position, area in enumerate(areas):
+        base = (area.get('prefix') or _derived_prefix(area['name']))[:8].upper()
+        prefix = base
+        suffix = 2
+        while prefix in used_prefixes:
+            prefix = f'{base[:6]}{suffix}'
+            suffix += 1
+        used_prefixes.add(prefix)
+
+        table_count = area['table_count']
+        columns = min(3, table_count)
+        section = SeatingSection.objects.create(
+            event=event,
+            name=area['name'],
+            prefix=prefix,
+            columns=columns,
+            is_reserved=area.get('is_reserved', False),
+            position=position,
+            x=60 + (position % 3) * 430,
+            y=60 + (position // 3) * 380,
+        )
+        SeatingTable.objects.bulk_create([
+            SeatingTable(
+                section=section,
+                event=event,
+                label=f'{prefix}-{index + 1:02d}',
+                shape=area.get('shape', SeatingTable.Shape.ROUND),
+                seats=area['seats_per_table'],
+                x=(index % columns) * 150,
+                y=(index // columns) * 150,
+                position=index,
+            )
+            for index in range(table_count)
+        ])
+        created.append(section)
+    return created
 
 
 def _seat_index(value: str, capacity: int) -> int | None:
@@ -115,6 +166,25 @@ def assign_guest_to_table(
     if changed:
         Guest.objects.bulk_update(changed, ['table_number', 'seat_number'])
     return len(requested)
+
+
+def assign_guest_to_section(event_id: int, guest_id, section_name: str) -> SeatingTable:
+    """Put one guest at the first table with a numbered seat available."""
+    tables = list(
+        SeatingTable.objects
+        .select_for_update()
+        .filter(event_id=event_id, section__name__iexact=section_name)
+        .order_by('section__position', 'position', 'id')
+    )
+    if not tables:
+        raise SeatingCapacityError(f'No seating area named "{section_name}" was found.')
+    for table in tables:
+        try:
+            assign_guest_to_table(event_id, [guest_id], table.label, table.seats)
+            return table
+        except SeatingCapacityError:
+            continue
+    raise SeatingCapacityError(f'{tables[0].section.name} has no available seats.')
 
 
 def clear_guests_from_table(event_id: int, guest_ids, label: str) -> int:

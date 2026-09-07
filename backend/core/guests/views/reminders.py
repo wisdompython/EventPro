@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.db.models.deletion import ProtectedError
 from rest_framework import status, viewsets, serializers
 from rest_framework.response import Response
@@ -182,6 +183,13 @@ class WhatsAppTemplateViewSet(viewsets.ModelViewSet):
             qs = qs.filter(is_active=True)
         if cat := self.request.query_params.get('category'):
             qs = qs.filter(category_id=cat)
+        if query := self.request.query_params.get('search', '').strip():
+            qs = qs.filter(
+                Q(name__icontains=query)
+                | Q(display_name__icontains=query)
+                | Q(description__icontains=query)
+                | Q(body_text__icontains=query)
+            )
         return qs
 
     def perform_create(self, serializer):

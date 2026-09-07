@@ -288,7 +288,9 @@ def process_bulk_guest_upload(self, upload_id: int):
         upload.refresh_from_db()
         return {'imported': upload.successful_rows, 'reason': f'upload is {upload.status}'}
     try:
-        valid_rows, error_report = parse_guest_csv(upload.event, upload.csv_file)
+        valid_rows, error_report = parse_guest_csv(
+            upload.event, upload.csv_file, replace_existing=upload.replace_existing,
+        )
         total_rows = len(valid_rows) + len(error_report)
         if upload.replace_existing and (error_report or not valid_rows):
             message = (

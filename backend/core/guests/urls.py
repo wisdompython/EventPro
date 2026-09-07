@@ -22,6 +22,6 @@ urlpatterns = [
     path('preferences/dashboard/', PreferenceDashboardView.as_view(), name='preference-dashboard'),
     path('webhooks/whatsapp/', whatsapp_webhook, name='whatsapp_webhook'),
     path('whatsapp/test-send/', whatsapp_test_send, name='whatsapp_test_send'),
-    path('guest-preferences/<uuid:token>/', GuestPreferencesView.as_view(), name='guest-preferences'),
+    path('guest-preferences/<str:token>/', GuestPreferencesView.as_view(), name='guest-preferences'),
     path('', include(router.urls)),
 ]

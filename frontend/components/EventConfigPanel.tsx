@@ -76,6 +76,11 @@ export default function EventConfigPanel({
         whatsappEnabled={whatsappEnabled}
         onToggle={toggleField}
       />
+      {showPreferencesToggle && <div>
+        <p className="mb-1 text-sm font-semibold text-[var(--ink)]">Guest response channel</p>
+        <p className="mb-3 text-xs text-[var(--muted)]">Open a standalone form only when guests need to submit choices outside RSVP.</p>
+        <PreferencesOnlyToggle enabled={preferencesEnabled} onChange={(enabled) => onChange({ preferencesEnabled: enabled })} />
+      </div>}
       {showGuestPreferenceOptions && <div>
         <p className="mb-1 text-sm font-semibold text-[var(--ink)]">Guest preferences</p>
         <p className="mb-3 text-xs text-[var(--muted)]">Enable only the guest choices and services that apply to this event.</p>
@@ -94,7 +99,6 @@ export default function EventConfigPanel({
             onLabelChange={(label) => onChange({ asoEbiLabel: label })}
             onUnitChange={(unit) => onChange({ asoEbiUnit: unit })}
           />
-          {showPreferencesToggle && <PreferencesOnlyToggle enabled={preferencesEnabled} onChange={(enabled) => onChange({ preferencesEnabled: enabled })} />}
           <CelebrantPreferences enabled={collectCelebrant} options={celebrantOptions} onChange={(patch) => onChange({ collectCelebrant: patch.enabled, celebrantOptions: patch.options })} />
         </div>
       </div>}

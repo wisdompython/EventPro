@@ -1,10 +1,12 @@
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
+from django.utils.text import slugify
 from django.db.models import Count, Q, Sum
 from rest_framework import serializers
-from ..models import Event, Font
+from ..models import Event, Font, GuestRequirement
 from accounts.tenancy import get_request_organization
+from ..domains.seating import create_initial_seating_setup
 
 # Guest fields that can be toggled required/optional per event
 CONFIGURABLE_FIELDS = ['full_name', 'phone_number', 'email', 'table_number', 'seat_number']
@@ -63,6 +65,8 @@ class EventSerializer(serializers.ModelSerializer):
     name_font_name = serializers.CharField(source='name_font.name', read_only=True)
     whatsapp_template_name = serializers.CharField(source='whatsapp_template.display_name', read_only=True)
     create_rsvp_workflow = serializers.BooleanField(write_only=True, required=False, default=False)
+    seating_setup = serializers.JSONField(write_only=True, required=False, default=list)
+    requirements_setup = serializers.JSONField(write_only=True, required=False, default=list)
     rsvp_workflow_id = serializers.SerializerMethodField()
 
     def get_guest_count(self, obj):
@@ -208,11 +212,13 @@ class EventSerializer(serializers.ModelSerializer):
             'ticket_types', 'required_fields', 'collect_aso_ebi', 'allow_plus_one',
             'plus_one_label', 'aso_ebi_label', 'aso_ebi_unit',
             'plus_one_term', 'aso_ebi_term', 'aso_ebi_unit_term',
-            'preferences_enabled', 'collect_celebrant', 'celebrant_options', 'whatsapp_enabled',
+            'preferences_enabled', 'preferences_deadline',
+            'collect_celebrant', 'celebrant_options', 'whatsapp_enabled',
             'seating_plan_width', 'seating_plan_height',
             'rsvp_enabled',
             'whatsapp_template', 'whatsapp_template_name',
             'pass_send_at', 'create_rsvp_workflow', 'rsvp_workflow_id',
+            'seating_setup', 'requirements_setup',
             'is_ended', 'guest_count', 'confirmed_count', 'checked_in_count',
             'plus_one_count', 'plus_one_checked_in_count', 'total_checked_in_count',
             'estimated_guest_count', 'aso_ebi_request_count', 'aso_ebi_quantity',
@@ -266,6 +272,44 @@ class EventSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'pass_send_at': 'The scheduled pass time must be before the event date.',
             })
+
+        preferences_enabled = attrs.get(
+            'preferences_enabled',
+            self.instance.preferences_enabled if self.instance else False,
+        )
+        rsvp_enabled = attrs.get(
+            'rsvp_enabled',
+            self.instance.rsvp_enabled if self.instance else False,
+        )
+        preferences_deadline = attrs.get(
+            'preferences_deadline',
+            self.instance.preferences_deadline if self.instance else None,
+        )
+        if preferences_enabled and rsvp_enabled:
+            raise serializers.ValidationError({
+                'preferences_enabled': 'Use RSVP collection or a standalone preferences form, not both.',
+            })
+        if preferences_enabled and not preferences_deadline:
+            raise serializers.ValidationError({
+                'preferences_deadline': 'Set a deadline for standalone preference submissions.',
+            })
+        if preferences_deadline and event_date and preferences_deadline >= event_date:
+            raise serializers.ValidationError({
+                'preferences_deadline': 'The preferences deadline must be before the event date.',
+            })
+        deadline_changed = not self.instance or preferences_deadline != self.instance.preferences_deadline
+        if preferences_enabled and deadline_changed and preferences_deadline <= timezone.now():
+            raise serializers.ValidationError({
+                'preferences_deadline': 'The preferences deadline must be in the future.',
+            })
+        if not preferences_enabled:
+            attrs['preferences_deadline'] = None
+        if attrs.get('requirements_setup') and not (
+            preferences_enabled or rsvp_enabled or attrs.get('create_rsvp_workflow')
+        ):
+            raise serializers.ValidationError({
+                'requirements_setup': 'Choose RSVP or standalone preferences before adding guest questions.',
+            })
         return attrs
 
     def validate_rsvp_background_image(self, value):
@@ -279,11 +323,30 @@ class EventSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         create_rsvp_workflow = validated_data.pop('create_rsvp_workflow', False)
+        seating_setup = validated_data.pop('seating_setup', [])
+        requirements_setup = validated_data.pop('requirements_setup', [])
         if create_rsvp_workflow:
             validated_data['rsvp_enabled'] = True
             validated_data['preferences_enabled'] = False
             validated_data['pass_send_at'] = None
         event = super().create(validated_data)
+        if seating_setup:
+            create_initial_seating_setup(event, seating_setup)
+        if requirements_setup:
+            collect_on = (
+                GuestRequirement.CollectOn.RSVP
+                if event.rsvp_enabled
+                else GuestRequirement.CollectOn.PREFERENCES
+            )
+            GuestRequirement.objects.bulk_create([
+                GuestRequirement(
+                    event=event,
+                    position=position,
+                    collect_on=collect_on,
+                    **requirement,
+                )
+                for position, requirement in enumerate(requirements_setup)
+            ])
         if create_rsvp_workflow:
             from rsvp.models import RsvpWorkflow
 
@@ -291,6 +354,113 @@ class EventSerializer(serializers.ModelSerializer):
             created_by = request.user if request and request.user.is_authenticated else None
             RsvpWorkflow.objects.create(event=event, created_by=created_by)
         return event
+
+    def validate_seating_setup(self, value):
+        if value in (None, ''):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Seating setup must be a list of seating areas.')
+        if len(value) > 20:
+            raise serializers.ValidationError('Create no more than 20 seating areas at once.')
+        cleaned = []
+        names = set()
+        for item in value:
+            if not isinstance(item, dict):
+                raise serializers.ValidationError('Each seating area must be an object.')
+            name = str(item.get('name', '')).strip()
+            if not name:
+                raise serializers.ValidationError('Every seating area needs a name.')
+            if name.casefold() in names:
+                raise serializers.ValidationError(f'The seating area "{name}" is repeated.')
+            names.add(name.casefold())
+            try:
+                table_count = int(item.get('table_count', 1))
+                seats_per_table = int(item.get('seats_per_table', 8))
+            except (TypeError, ValueError):
+                raise serializers.ValidationError('Table and seat counts must be whole numbers.')
+            if not 1 <= table_count <= 60:
+                raise serializers.ValidationError(f'{name} must contain between 1 and 60 tables.')
+            if not 1 <= seats_per_table <= 60:
+                raise serializers.ValidationError(f'Tables in {name} must seat between 1 and 60 guests.')
+            shape = item.get('shape', 'round')
+            if shape not in {'round', 'rectangle'}:
+                raise serializers.ValidationError(f'{name} has an invalid table shape.')
+            cleaned.append({
+                'name': name,
+                'prefix': str(item.get('prefix', '')).strip()[:8],
+                'table_count': table_count,
+                'seats_per_table': seats_per_table,
+                'shape': shape,
+                'is_reserved': bool(item.get('is_reserved', False)),
+            })
+        return cleaned
+
+    def validate_requirements_setup(self, value):
+        if value in (None, ''):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Guest questions must be a list.')
+        if len(value) > 30:
+            raise serializers.ValidationError('Create no more than 30 guest questions at once.')
+
+        valid_kinds = {choice for choice, _label in GuestRequirement.Kind.choices}
+        valid_applies_to = {choice for choice, _label in GuestRequirement.AppliesTo.choices}
+        kinds_with_options = {
+            GuestRequirement.Kind.CHOICE,
+            GuestRequirement.Kind.MULTI_CHOICE,
+        }
+        cleaned = []
+        used_keys = set()
+        for index, item in enumerate(value, start=1):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(f'Question {index} must be an object.')
+            label = str(item.get('label', '')).strip()
+            if not label:
+                raise serializers.ValidationError(f'Question {index} needs a label.')
+            if len(label) > 120:
+                raise serializers.ValidationError(f'Question {index} is too long.')
+            key = slugify(str(item.get('key', '')).strip() or label).replace('-', '_')[:50]
+            if not key:
+                raise serializers.ValidationError(f'Question {index} needs a usable label.')
+            if key in used_keys:
+                raise serializers.ValidationError(f'The question key "{key}" is repeated.')
+            used_keys.add(key)
+
+            kind = item.get('kind')
+            if kind not in valid_kinds:
+                raise serializers.ValidationError(f'Question {index} has an invalid answer type.')
+            applies_to = item.get('applies_to', GuestRequirement.AppliesTo.EVERYONE)
+            if applies_to not in valid_applies_to:
+                raise serializers.ValidationError(f'Question {index} has an invalid audience.')
+            required = item.get('required', False)
+            if not isinstance(required, bool):
+                raise serializers.ValidationError(f'Question {index} required must be true or false.')
+
+            raw_options = item.get('options', [])
+            if not isinstance(raw_options, list):
+                raise serializers.ValidationError(f'Question {index} options must be a list.')
+            options = [str(option).strip() for option in raw_options if str(option).strip()]
+            if len(options) != len(set(options)):
+                raise serializers.ValidationError(f'Question {index} options must be different.')
+            if kind in kinds_with_options and not options:
+                raise serializers.ValidationError(f'Question {index} needs at least one option.')
+            if kind not in kinds_with_options:
+                options = []
+
+            unit = str(item.get('unit', '')).strip()
+            if kind != GuestRequirement.Kind.QUANTITY:
+                unit = ''
+            cleaned.append({
+                'key': key,
+                'label': label,
+                'help_text': str(item.get('help_text', '')).strip()[:255],
+                'kind': kind,
+                'options': options,
+                'unit': unit[:20],
+                'required': required,
+                'applies_to': applies_to,
+            })
+        return cleaned
 
     def validate_ticket_types(self, value):
         if not isinstance(value, list):
