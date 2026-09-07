@@ -53,6 +53,14 @@ Built for event agencies, wedding planners, churches, and corporate brand events
 - Supports full URL, plain UUID, and legacy pipe-delimited QR formats
 - Check-in status and timestamp recorded per guest
 - Conflict detection — already checked-in guests return 409
+- Privacy-safe operational card shows seating area, table, seat number, meal and other structured service choices
+- Phone numbers, email addresses and free-text preference notes are excluded from scan/check-in responses
+
+### Seating and Catering Operations
+- Visual venue planner with table sections, capacity, fixtures and flexible curved routes
+- Assigning a guest to a table automatically allocates the first available numbered seat
+- Preference totals are collated by option (for example, Jollof rice: 25) and by seating table
+- Download complete caterer service packs or individual waiter cards as PDF/PNG, plus supplier CSV exports
 
 ### Reminders
 - Schedule automated WhatsApp reminder messages per event
@@ -243,6 +251,10 @@ Two things differ from the `runserver` configuration on purpose:
 
 ### Backend (`backend/.env`)
 
+The root Docker stack loads this file for the backend, Celery worker and Celery
+Beat. Keep real Meta credentials here; `docker-compose.yml` deliberately does
+not copy those secrets into source control.
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SECRET_KEY` | Django secret key | — |
@@ -256,6 +268,7 @@ Two things differ from the `runserver` configuration on purpose:
 | `DB_PORT` | PostgreSQL port | `5432` |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowed origins | `http://localhost:3000` |
 | `CELERY_BROKER_URL` | Redis broker URL | `redis://localhost:6379/0` |
+| `WHATSAPP_TRANSPORT` | `meta` for real delivery or `log` for local simulation | `meta` |
 | `WHATSAPP_PHONE_ID` | Meta phone number ID | — |
 | `WHATSAPP_TOKEN` | Meta permanent access token | — |
 | `WHATSAPP_APP_ID` | Meta app ID | — |
@@ -278,8 +291,12 @@ Two things differ from the `runserver` configuration on purpose:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/auth/login/` | Login (username or email) |
+| POST | `/api/auth/signup/` | Create an account and organization |
 | POST | `/api/auth/logout/` | Logout |
-| GET | `/api/auth/me/` | Current user |
+| GET/PATCH | `/api/auth/me/` | Read or update the current profile |
+| POST | `/api/auth/password/change/` | Change password using the current password |
+| POST | `/api/auth/password/reset/` | Request an enumeration-safe reset email |
+| POST | `/api/auth/password/reset/confirm/` | Set a new password using the reset token |
 | GET | `/api/auth/users/` | List users (super admin) |
 | POST | `/api/auth/users/` | Create user |
 | PATCH | `/api/auth/users/{id}/` | Update user |
@@ -302,13 +319,13 @@ Two things differ from the `runserver` configuration on purpose:
 | GET | `/api/guests/{id}/` | Get guest |
 | PATCH | `/api/guests/{id}/` | Update guest |
 | DELETE | `/api/guests/{id}/` | Delete guest |
-| POST | `/api/guests/{id}/check_in/` | Check in guest |
+| POST | `/api/guests/{id}/check_in/` | Check in guest; returns privacy-safe operational details |
 | POST | `/api/guests/{id}/regenerate_assets/` | Regenerate QR + pass (queued) |
 | POST | `/api/guests/{id}/send_whatsapp/` | Send pass via WhatsApp (queued) |
 | POST | `/api/guests/{id}/send_message/` | Send free-form WhatsApp message |
 | POST | `/api/guests/bulk-upload/` | CSV bulk upload |
 | POST | `/api/guests/bulk_send_whatsapp/` | Bulk send passes for an event (queued) |
-| GET | `/api/guests/scan/?token=` | Scan QR token for check-in |
+| GET | `/api/guests/scan/?token=` | Scan QR token; returns area, table, seat and structured preferences without contact data |
 | GET | `/api/guests/export/` | Export CSV |
 | GET | `/api/guests/download-assets/` | Download ZIP of passes and/or QR codes |
 

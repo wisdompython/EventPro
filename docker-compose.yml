@@ -35,6 +35,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     command: python manage.py runserver 0.0.0.0:8000
+    # The existing backend/.env is the source of private Django, database and
+    # Meta WhatsApp credentials. Explicit development values below only
+    # override settings that must point at Compose service names.
+    env_file:
+      - ./backend/.env
     environment: &backend-environment
       SECRET_KEY: ${SECRET_KEY:-event-pro-local-development-key}
       DEBUG: "True"
@@ -57,14 +62,6 @@ services:
       MAILTRAP_SMTP_USE_TLS: ${MAILTRAP_SMTP_USE_TLS:-True}
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-Event Pro <no-reply@eventpro.local>}
       PASSWORD_RESET_TIMEOUT: ${PASSWORD_RESET_TIMEOUT:-3600}
-      WHATSAPP_TRANSPORT: ${WHATSAPP_TRANSPORT:-log}
-      WHATSAPP_PHONE_ID: ${WHATSAPP_PHONE_ID:-}
-      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
-      WHATSAPP_APP_ID: ${WHATSAPP_APP_ID:-}
-      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
-      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-guest_management_verify}
-      WHATSAPP_PASS_TEMPLATE: ${WHATSAPP_PASS_TEMPLATE:-event_pass_delivery}
-      WHATSAPP_MEDIA_BASE_URL: ${WHATSAPP_MEDIA_BASE_URL:-}
       EVENT_PRO_DEMO_USERNAME: ${EVENT_PRO_DEMO_USERNAME:-eventpro-demo}
       EVENT_PRO_DEMO_PASSWORD: ${EVENT_PRO_DEMO_PASSWORD:-eventpro123}
       EVENT_PRO_DEMO_EMAIL: ${EVENT_PRO_DEMO_EMAIL:-admin@eventpro.local}
@@ -92,6 +89,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     command: celery -A core worker --loglevel=info --concurrency=2 -Q celery,imports,assets,messages
+    env_file:
+      - ./backend/.env
     environment: *backend-environment
     volumes:
       - ./backend/core:/app
@@ -109,6 +108,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     command: celery -A core beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    env_file:
+      - ./backend/.env
     environment: *backend-environment
     volumes:
       - ./backend/core:/app

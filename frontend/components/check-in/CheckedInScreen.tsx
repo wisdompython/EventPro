@@ -1,6 +1,6 @@
 'use client'
 
-import { Guest } from '@/lib/api'
+import { CheckInGuest } from '@/lib/api'
 
 function GuestInfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -14,7 +14,7 @@ function GuestInfoRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export function CheckedInScreen({ guest, onNext }: { guest: Guest; onNext: () => void }) {
+export function CheckedInScreen({ guest, onNext }: { guest: CheckInGuest; onNext: () => void }) {
   return (
     <div className="h-full overflow-auto flex flex-col items-center justify-center px-6 py-12 text-white" style={{ background: '#12151c' }}>
       <div className="w-20 h-20 rounded-sm flex items-center justify-center mb-6" style={{ background: 'var(--brand)' }}>
@@ -31,9 +31,13 @@ export function CheckedInScreen({ guest, onNext }: { guest: Guest; onNext: () =>
           <span className="text-white font-bold text-base">{guest.full_name}</span>
         </div>
         <GuestInfoRow label="Ticket" value={guest.ticket_type.toUpperCase()} />
+        {guest.seating_area && <GuestInfoRow label="Area" value={guest.seating_area} />}
         {guest.table_number && (
           <GuestInfoRow label="Table" value={`${guest.table_number}${guest.seat_number ? ` / Seat ${guest.seat_number}` : ''}`} />
         )}
+        {guest.service_preferences.map((preference) => (
+          <GuestInfoRow key={preference.key} label={preference.label} value={preference.value} />
+        ))}
         {guest.event_name && <GuestInfoRow label="Event" value={guest.event_name} />}
         {guest.celebrant_name && <GuestInfoRow label="Celebrant" value={guest.celebrant_name} />}
         {guest.plus_one_attending && <GuestInfoRow label="Plus one" value={guest.has_named_plus_one ? 'Uses a separate pass and QR' : `Shared pass · ${guest.plus_one_checked_in ? 'checked in' : 'pending'}`} />}

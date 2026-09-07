@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { api, Guest, Event } from '@/lib/api'
-import { useAuth } from '@/lib/auth'
+import { api, CheckInGuest, Guest, Event } from '@/lib/api'
 import {
   CheckedInScreen,
   DuplicateScreen,
@@ -16,7 +15,7 @@ type ScanState = 'idle' | 'loading' | 'found' | 'checked_in' | 'duplicate' | 'in
 
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i
 
-function partyFullyCheckedIn(guest: Guest) {
+function partyFullyCheckedIn(guest: CheckInGuest) {
   return guest.status === 'checked_in' && (!guest.plus_one_attending || guest.has_named_plus_one || guest.plus_one_checked_in)
 }
 
@@ -25,10 +24,9 @@ function looksLikeCompleteScan(value: string) {
 }
 
 export default function CheckInPage() {
-  const { isSuperAdmin } = useAuth()
   const [token, setToken] = useState('')
   const [state, setState] = useState<ScanState>('idle')
-  const [guest, setGuest] = useState<Guest | null>(null)
+  const [guest, setGuest] = useState<CheckInGuest | null>(null)
   const [invalidReason, setInvalidReason] = useState<InvalidReason>('not_found')
   const [checkingIn, setCheckingIn] = useState(false)
   const [events, setEvents] = useState<Event[]>([])
@@ -160,7 +158,7 @@ export default function CheckInPage() {
   if (state === 'duplicate' && guest) return <DuplicateScreen guest={guest} onNext={reset} />
   if (state === 'invalid') return <InvalidScreen onReset={reset} reason={invalidReason} />
   if (state === 'found' && guest) return (
-    <GuestFoundScreen guest={guest} checkingIn={checkingIn} onConfirm={handleCheckIn} onCancel={reset} showPhone={isSuperAdmin} />
+    <GuestFoundScreen guest={guest} checkingIn={checkingIn} onConfirm={handleCheckIn} onCancel={reset} />
   )
 
   return (

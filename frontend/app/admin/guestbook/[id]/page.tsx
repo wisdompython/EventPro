@@ -79,7 +79,15 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   async function handleCheckIn() {
     if (!guest) return
     setCheckingIn(true)
-    try { const updated = await api.checkIn(guest.id); setGuest(updated) }
+    try {
+      const updated = await api.checkIn(guest.id)
+      setGuest((current) => current ? {
+        ...current,
+        status: updated.status,
+        checked_in_at: updated.checked_in_at,
+        plus_one_checked_in: updated.plus_one_checked_in,
+      } : current)
+    }
     catch (err: unknown) { setError(err instanceof Error ? err.message : 'Check-in failed.') }
     finally { setCheckingIn(false) }
   }

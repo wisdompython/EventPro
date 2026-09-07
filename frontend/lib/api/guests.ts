@@ -1,5 +1,5 @@
 import { request } from './request';
-import type { Guest, GuestList, CreateGuestPayload, GuestPreferencesDetails } from './types';
+import type { CheckInGuest, Guest, GuestList, CreateGuestPayload, GuestPreferencesDetails } from './types';
 
 export const guestsApi = {
   getGuests: (params?: Record<string, string>, signal?: AbortSignal) => {
@@ -16,7 +16,7 @@ export const guestsApi = {
   deleteAllGuests: (eventId: number) =>
     request<{ deleted: number }>('/guests/bulk-delete/', { method: 'POST', body: JSON.stringify({ event_id: eventId }) }),
   checkIn: (id: string, target: 'guest' | 'plus_one' | 'both' = 'guest') =>
-    request<Guest>(`/guests/${id}/check_in/`, { method: 'POST', body: JSON.stringify({ target }) }),
+    request<CheckInGuest>(`/guests/${id}/check_in/`, { method: 'POST', body: JSON.stringify({ target }) }),
   regenerateAssets: (id: string) =>
     request<{ queued: boolean; guest_id: string }>(`/guests/${id}/regenerate_assets/`, { method: 'POST' }),
   sendWhatsApp: (id: string) =>
@@ -28,7 +28,7 @@ export const guestsApi = {
   sendMessage: (id: string, message: string) =>
     request<{ sent: boolean }>(`/guests/${id}/send_message/`, { method: 'POST', body: JSON.stringify({ message }) }),
   scanGuest: (token: string) =>
-    request<Guest>(`/guests/scan/?token=${encodeURIComponent(token)}`),
+    request<CheckInGuest>(`/guests/scan/?token=${encodeURIComponent(token)}`),
   getGuestPreferences: (token: string) =>
     request<GuestPreferencesDetails>(`/guest-preferences/${token}/`),
   submitGuestPreferences: (token: string, payload: {

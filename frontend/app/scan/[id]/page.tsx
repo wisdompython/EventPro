@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth'
-import { api, Guest } from '@/lib/api'
+import { api, CheckInGuest } from '@/lib/api'
 
 type State = 'loading' | 'found' | 'checking_in' | 'checked_in' | 'duplicate' | 'error'
 
@@ -13,7 +13,7 @@ const TICKET_COLORS: Record<string, { bg: string; color: string }> = {
   general: { bg: 'var(--chip)', color: 'var(--muted)' },
 }
 
-function partyFullyCheckedIn(guest: Guest) {
+function partyFullyCheckedIn(guest: CheckInGuest) {
   return guest.status === 'checked_in' && (!guest.plus_one_attending || guest.has_named_plus_one || guest.plus_one_checked_in)
 }
 
@@ -22,7 +22,7 @@ export default function ScanGuestPage({ params }: { params: Promise<{ id: string
   const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const [state, setState] = useState<State>('loading')
-  const [guest, setGuest] = useState<Guest | null>(null)
+  const [guest, setGuest] = useState<CheckInGuest | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
 
   // Redirect to login if not authenticated, preserving destination
@@ -172,7 +172,7 @@ function Spinner() {
   )
 }
 
-function GuestInfoCard({ guest, highlight }: { guest: Guest; highlight?: boolean }) {
+function GuestInfoCard({ guest, highlight }: { guest: CheckInGuest; highlight?: boolean }) {
   const tc = TICKET_COLORS[guest.ticket_type] ?? TICKET_COLORS.general
   return (
     <div className="w-full rounded-2xl p-5 space-y-4"
@@ -206,12 +206,20 @@ function GuestInfoCard({ guest, highlight }: { guest: Guest; highlight?: boolean
             {guest.ticket_type.toUpperCase()}
           </span>
         } />
-        <InfoRow label="Phone" value={guest.phone_number || '—'} />
+        {guest.seating_area && <InfoRow label="Area" value={guest.seating_area} />}
         {guest.table_number && <InfoRow label="Table" value={guest.table_number} />}
         {guest.seat_number  && <InfoRow label="Seat"  value={guest.seat_number}  />}
         {guest.celebrant_name && <InfoRow label="Celebrant" value={guest.celebrant_name} />}
         {guest.plus_one_attending && <InfoRow label="Plus one" value={guest.has_named_plus_one ? 'Separate pass and QR' : `Shared pass · ${guest.plus_one_checked_in ? 'checked in' : 'pending'}`} />}
       </div>
+      {guest.service_preferences.length > 0 && (
+        <div className="grid gap-3 border-t pt-4" style={{ borderColor: 'var(--line)' }}>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--brand)' }}>Service information</p>
+          {guest.service_preferences.map((preference) => (
+            <InfoRow key={preference.key} label={preference.label} value={preference.value} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

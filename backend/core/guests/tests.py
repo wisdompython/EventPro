@@ -929,7 +929,7 @@ class SendPassRetryTests(TestCase):
                 pass
 
         with patch('guests.whatsapp._get_client') as mock_client, \
-             self.settings(WHATSAPP_PHONE_ID='id', WHATSAPP_TOKEN='tok', WHATSAPP_MEDIA_BASE_URL='https://example.com'):
+             self.settings(WHATSAPP_TRANSPORT='meta', WHATSAPP_PHONE_ID='id', WHATSAPP_TOKEN='tok', WHATSAPP_MEDIA_BASE_URL='https://example.com'):
             mock_client.return_value.send_template.side_effect = FakeTransientError()
             with self.assertRaises(WhatsAppError):
                 send_pass(self.guest)
@@ -938,7 +938,7 @@ class SendPassRetryTests(TestCase):
         from .whatsapp import send_pass
 
         with patch('guests.whatsapp._get_client') as mock_client, \
-             self.settings(WHATSAPP_PHONE_ID='id', WHATSAPP_TOKEN='tok', WHATSAPP_MEDIA_BASE_URL='https://example.com'):
+             self.settings(WHATSAPP_TRANSPORT='meta', WHATSAPP_PHONE_ID='id', WHATSAPP_TOKEN='tok', WHATSAPP_MEDIA_BASE_URL='https://example.com'):
             mock_client.return_value.send_template.side_effect = RuntimeError('boom')
             self.assertFalse(send_pass(self.guest))
 
@@ -1000,6 +1000,7 @@ class ReminderRetryTests(TestCase):
 
 
 @override_settings(
+    WHATSAPP_TRANSPORT='meta',
     WHATSAPP_PHONE_ID='phone-id',
     WHATSAPP_TOKEN='token',
     WHATSAPP_MEDIA_BASE_URL='https://media.example.com',
@@ -1287,9 +1288,76 @@ class CheckInTests(TestCase):
     def test_check_in_succeeds(self):
         r = self.client.post(f'/api/guests/{self.guest.id}/check_in/')
         self.assertEqual(r.status_code, 200)
+        self.assertNotIn('phone_number', r.data)
+        self.assertNotIn('email', r.data)
         self.guest.refresh_from_db()
         self.assertEqual(self.guest.status, Guest.Status.CHECKED_IN)
         self.assertIsNotNone(self.guest.checked_in_at)
+
+    def test_scan_returns_seating_and_structured_service_information_only(self):
+        from .models import (
+            GuestRequirement,
+            GuestRequirementResponse,
+            SeatingSection,
+            SeatingTable,
+        )
+
+        section = SeatingSection.objects.create(
+            event=self.event,
+            name='Main hall',
+            kind=SeatingSection.Kind.TABLES,
+            prefix='MH',
+        )
+        SeatingTable.objects.create(
+            event=self.event,
+            section=section,
+            label='MH-01',
+            seats=8,
+        )
+        self.guest.table_number = 'MH-01'
+        self.guest.seat_number = '4'
+        self.guest.phone_number = '+2348000000001'
+        self.guest.email = 'private@example.com'
+        self.guest.save(update_fields=['table_number', 'seat_number', 'phone_number', 'email'])
+
+        meal = GuestRequirement.objects.create(
+            event=self.event,
+            key='meal',
+            label='Meal choice',
+            kind=GuestRequirement.Kind.CHOICE,
+            options=['Jollof rice', 'Fried rice'],
+        )
+        private_note = GuestRequirement.objects.create(
+            event=self.event,
+            key='private-note',
+            label='Private note',
+            kind=GuestRequirement.Kind.TEXT,
+        )
+        GuestRequirementResponse.objects.create(
+            guest=self.guest,
+            requirement=meal,
+            value_text='Jollof rice',
+        )
+        GuestRequirementResponse.objects.create(
+            guest=self.guest,
+            requirement=private_note,
+            value_text='Do not show this at the door',
+        )
+
+        response = self.client.get(f'/api/guests/scan/?token={self.guest.id}')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertNotIn('phone_number', response.data)
+        self.assertNotIn('email', response.data)
+        self.assertEqual(response.data['seating_area'], 'Main hall')
+        self.assertEqual(response.data['table_number'], 'MH-01')
+        self.assertEqual(response.data['seat_number'], '4')
+        self.assertEqual(response.data['service_preferences'], [{
+            'key': 'meal',
+            'label': 'Meal choice',
+            'kind': 'choice',
+            'value': 'Jollof rice',
+        }])
 
     def test_double_check_in_returns_409(self):
         self.client.post(f'/api/guests/{self.guest.id}/check_in/')

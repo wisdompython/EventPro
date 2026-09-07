@@ -1,6 +1,6 @@
 from django.db import transaction
 from rest_framework import serializers
-from ..models import Guest
+from ..models import Guest, GuestRequirement, SeatingTable
 from .event import CONFIGURABLE_FIELDS, _event_required_fields, _event_valid_ticket_values
 from accounts.models import MembershipRole
 from accounts.tenancy import get_request_organization, has_membership_role
@@ -12,6 +12,90 @@ def _can_see_phone(request) -> bool:
         request and request.user and request.user.is_authenticated and
         (request.user.is_superuser or has_membership_role(request, MembershipRole.ADMIN))
     )
+
+
+class CheckInGuestSerializer(serializers.ModelSerializer):
+    """Operational guest data safe for scanner and door-desk screens.
+
+    Contact details, email, assets, links, and free-text answers are deliberately
+    absent. Staff receive only identity, admission, seating, and structured
+    service choices needed to direct and serve the guest.
+    """
+
+    event_name = serializers.CharField(source='event.name', read_only=True)
+    seating_area = serializers.SerializerMethodField()
+    service_preferences = serializers.SerializerMethodField()
+    has_named_plus_one = serializers.SerializerMethodField()
+    named_plus_one_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Guest
+        fields = (
+            'id', 'event', 'event_name', 'full_name', 'ticket_type',
+            'seating_area', 'table_number', 'seat_number',
+            'service_preferences', 'celebrant_name',
+            'status', 'checked_in_at', 'registered_at',
+            'plus_one_attending', 'plus_one_checked_in',
+            'has_named_plus_one', 'named_plus_one_name',
+        )
+        read_only_fields = fields
+
+    def get_seating_area(self, obj):
+        if not obj.table_number:
+            return ''
+        return (
+            SeatingTable.objects
+            .filter(event_id=obj.event_id, label=obj.table_number)
+            .values_list('section__name', flat=True)
+            .first()
+            or ''
+        )
+
+    def get_service_preferences(self, obj):
+        # Free-text questions may contain private notes, so only structured
+        # choices and quantities are displayed at the door.
+        responses = (
+            obj.requirement_responses
+            .select_related('requirement')
+            .filter(requirement__is_active=True)
+            .exclude(requirement__kind=GuestRequirement.Kind.TEXT)
+            .order_by('requirement__position', 'requirement_id')
+        )
+        result = []
+        for response in responses:
+            requirement = response.requirement
+            if requirement.kind == GuestRequirement.Kind.BOOLEAN:
+                if response.value_bool is None:
+                    continue
+                value = 'Yes' if response.value_bool else 'No'
+            elif requirement.kind == GuestRequirement.Kind.QUANTITY:
+                if not response.value_int:
+                    continue
+                value = f'{response.value_int} {requirement.unit_term}'
+            elif requirement.kind == GuestRequirement.Kind.MULTI_CHOICE:
+                if not response.value_json:
+                    continue
+                value = ', '.join(str(item) for item in response.value_json)
+            else:
+                if not response.value_text:
+                    continue
+                value = response.value_text
+            result.append({
+                'key': requirement.key,
+                'label': requirement.label,
+                'kind': requirement.kind,
+                'value': value,
+            })
+        return result
+
+    def get_has_named_plus_one(self, obj):
+        from ..plus_one import get_named_plus_one
+        return get_named_plus_one(obj) is not None
+
+    def get_named_plus_one_name(self, obj):
+        from ..plus_one import get_named_plus_one
+        plus_one = get_named_plus_one(obj)
+        return plus_one.full_name if plus_one else ''
 
 
 class GuestSerializer(serializers.ModelSerializer):

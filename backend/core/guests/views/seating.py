@@ -517,6 +517,7 @@ class SeatingTableViewSet(viewsets.ModelViewSet):
         })
 
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def assign(self, request, pk=None):
         """Seat or unseat guests at this table.
 
@@ -524,7 +525,9 @@ class SeatingTableViewSet(viewsets.ModelViewSet):
         which is what the rest of the product already reads. Guests from another
         event are ignored.
         """
-        table = self.get_object()
+        # Lock the table so two coordinators cannot claim the same numbered
+        # seat at the same time.
+        table = self.get_queryset().select_for_update().get(pk=pk)
         add = request.data.get('add') or []
         remove = request.data.get('remove') or []
         if not isinstance(add, list) or not isinstance(remove, list):
@@ -533,11 +536,18 @@ class SeatingTableViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        seated = seating_service.assign_guest_to_table(
-            table.event_id, add, table.label,
-        )
         cleared = seating_service.clear_guests_from_table(
             table.event_id, remove, table.label,
         )
+        try:
+            seated = seating_service.assign_guest_to_table(
+                table.event_id, add, table.label, table.seats,
+            )
+        except seating_service.SeatingCapacityError as exc:
+            transaction.set_rollback(True)
+            return Response(
+                {'detail': str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         return Response({'seated': seated, 'cleared': cleared})

@@ -421,6 +421,7 @@
   padding: 7px 9px;
 }
 .seating-guest-list span { min-width: 0; overflow: hidden; color: #10231d; font-size: 0.74rem; text-overflow: ellipsis; white-space: nowrap; }
+.seating-guest-list span small { margin-left: 7px; color: #6757d9; font-size: 0.64rem; font-weight: 800; }
 .seating-guest-list button {
   display: grid;
   flex: 0 0 22px;
@@ -447,21 +448,119 @@
 
 .seating-empty { padding: 40px 0; color: #6e766f; font-size: 0.82rem; text-align: center; }
 
-.seating-event-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.seating-event-card {
+.seating-picker-page { padding-bottom: 72px; }
+.seating-picker-header { align-items: center; margin-bottom: 28px; }
+.seating-picker-header .admin-page__identity { max-width: 670px; }
+.seating-picker-overview {
   display: grid;
-  gap: 5px;
-  border: 1px solid var(--admin-line);
-  border-radius: 4px;
-  background: var(--admin-surface);
-  padding: 17px;
-  text-align: left;
-  box-shadow: var(--admin-shadow);
-  transition: border-color 140ms ease, transform 140ms ease;
+  grid-template-columns: repeat(3, minmax(84px, 1fr));
+  overflow: hidden;
+  flex: 0 0 auto;
+  border: 1px solid rgba(103, 87, 217, 0.17);
+  border-radius: 18px 6px 18px 6px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 12px 30px rgba(53, 42, 111, 0.065);
 }
-.seating-event-card:hover { border-color: #10231d; transform: translateY(-1px); }
-.seating-event-card strong { color: #10231d; font-size: 0.85rem; font-weight: 800; }
-.seating-event-card span { color: #6e766f; font-size: 0.72rem; }
+.seating-picker-overview > div { min-width: 100px; padding: 15px 17px; }
+.seating-picker-overview > div + div { border-left: 1px solid rgba(35, 29, 55, 0.08); }
+.seating-picker-overview strong { display: block; color: #211d2b; font-family: var(--font-display); font-size: 1.28rem; font-weight: 800; letter-spacing: -0.04em; }
+.seating-picker-overview span { display: block; margin-top: 2px; color: #8a8392; font-size: 0.57rem; font-weight: 720; letter-spacing: 0.025em; text-transform: uppercase; }
+
+.seating-picker-shell {
+  overflow: hidden;
+  border: 1px solid rgba(35, 29, 55, 0.105);
+  border-radius: 24px 7px 24px 7px;
+  background: rgba(255, 255, 255, 0.54);
+  box-shadow: 0 18px 48px rgba(38, 30, 65, 0.065);
+}
+.seating-picker-toolbar {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(260px, 430px) auto;
+  align-items: center;
+  gap: 16px;
+  background: linear-gradient(115deg, #171522 0%, #211d32 70%, #2b2448 100%);
+  padding: 17px 19px;
+}
+.seating-picker-toolbar > div:first-child { display: flex; min-width: 0; flex-direction: column; }
+.seating-picker-toolbar > div:first-child strong { color: white; font-family: var(--font-display); font-size: 0.82rem; font-weight: 780; }
+.seating-picker-toolbar > div:first-child > span { margin-top: 3px; color: #8f879b; font-size: 0.6rem; }
+.seating-event-search {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 13px 4px 13px 4px;
+  background: rgba(255, 255, 255, 0.07);
+  padding: 0 12px;
+  color: #a39bab;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.seating-event-search:focus-within { border-color: rgba(188, 174, 251, 0.65); box-shadow: 0 0 0 3px rgba(103, 87, 217, 0.22); }
+.seating-event-search svg { flex: 0 0 auto; }
+.seating-event-search input { width: 100%; border: 0; outline: 0; background: transparent; color: white; font-size: 0.72rem; }
+.seating-event-search input::placeholder { color: #777080; }
+.seating-event-scopes { display: flex; flex: 0 0 auto; gap: 4px; border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 13px 4px 13px 4px; background: rgba(255, 255, 255, 0.04); padding: 4px; }
+.seating-event-scopes button { display: flex; min-height: 32px; align-items: center; gap: 7px; border-radius: 9px 3px 9px 3px; padding: 0 10px; color: #a69eaf; font-size: 0.62rem; font-weight: 720; }
+.seating-event-scopes button span { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 99px; background: rgba(255, 255, 255, 0.08); color: #d4cfd8; font-size: 0.52rem; }
+.seating-event-scopes button.is-active { background: #6757d9; color: white; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18); }
+.seating-event-scopes button.is-active span { background: rgba(255, 255, 255, 0.17); color: white; }
+
+.seating-event-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 15px; padding: 19px; }
+.seating-event-card {
+  position: relative;
+  display: flex;
+  min-height: 292px;
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid rgba(35, 29, 55, 0.11);
+  border-radius: 20px 6px 20px 6px;
+  background: #fff;
+  padding: 0;
+  text-align: left;
+  box-shadow: 0 10px 28px rgba(35, 29, 55, 0.045);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+.seating-event-card:hover { border-color: rgba(103, 87, 217, 0.48); box-shadow: 0 19px 40px rgba(53, 42, 111, 0.115); transform: translateY(-3px); }
+.seating-event-card:focus-visible { outline: 3px solid rgba(103, 87, 217, 0.25); outline-offset: 3px; }
+.seating-event-card__accent { position: absolute; inset: 0 0 auto; height: 4px; background: linear-gradient(90deg, #6757d9 0%, #9d89ee 58%, #ee7651 100%); }
+.seating-event-card__topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 18px 4px; }
+.seating-event-id { border: 1px solid rgba(103, 87, 217, 0.2); border-radius: 8px 3px 8px 3px; background: rgba(103, 87, 217, 0.07); padding: 4px 7px; color: #5a4cc4; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.58rem; font-weight: 800; letter-spacing: 0.035em; }
+.seating-event-status { display: flex; align-items: center; gap: 6px; color: #7e7787; font-size: 0.6rem; font-weight: 730; }
+.seating-event-status i { width: 7px; height: 7px; border-radius: 50%; background: #aaa3b2; }
+.seating-event-status.is-live { color: #0e8f6b; }
+.seating-event-status.is-live i { background: #16a37c; box-shadow: 0 0 0 4px rgba(22, 163, 124, 0.12); }
+.seating-event-status.is-upcoming { color: #6757d9; }
+.seating-event-status.is-upcoming i { background: #6757d9; }
+
+.seating-event-card__body { display: grid; grid-template-columns: 57px minmax(0, 1fr); gap: 14px; padding: 17px 18px 18px; }
+.seating-event-date { display: flex; height: 64px; flex-direction: column; align-items: center; justify-content: center; border-radius: 15px 5px 15px 5px; background: #171522; color: white; box-shadow: 0 9px 18px rgba(23, 21, 34, 0.17); }
+.seating-event-date b { font-family: var(--font-display); font-size: 1.2rem; font-weight: 800; line-height: 1; }
+.seating-event-date small { margin-top: 5px; color: #c1b9cb; font-size: 0.54rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.seating-event-card__identity { display: flex; min-width: 0; flex-direction: column; }
+.seating-event-card__identity strong { display: -webkit-box; overflow: hidden; color: #211d2b; font-family: var(--font-display); font-size: 1.03rem; font-weight: 780; letter-spacing: -0.025em; line-height: 1.24; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.seating-event-card__identity > span { margin-top: 5px; color: #837c8b; font-size: 0.64rem; }
+.seating-event-card__identity .seating-event-venue { overflow: hidden; margin-top: 7px; color: #5d5666; font-size: 0.66rem; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.seating-event-venue::before { content: '⌖'; margin-right: 5px; color: #ee7651; font-size: 0.78rem; }
+.seating-event-card__stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: auto 18px 0; overflow: hidden; border: 1px solid rgba(35, 29, 55, 0.075); border-radius: 12px 4px 12px 4px; background: rgba(35, 29, 55, 0.075); }
+.seating-event-card__stats > span { display: flex; min-width: 0; flex-direction: column; background: #faf9fc; padding: 10px 9px; }
+.seating-event-card__stats b { color: #302a3a; font-family: var(--font-display); font-size: 0.9rem; font-weight: 800; }
+.seating-event-card__stats small { overflow: hidden; margin-top: 2px; color: #918a99; font-size: 0.51rem; text-overflow: ellipsis; white-space: nowrap; }
+.seating-event-card__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; background: #f7f5fb; padding: 12px 18px; }
+.seating-event-card__footer > span { color: #918a99; font-size: 0.57rem; }
+.seating-event-card__footer > strong { display: flex; align-items: center; gap: 7px; color: #5144bd; font-size: 0.64rem; font-weight: 800; }
+.seating-event-card__footer > strong i { font-size: 0.9rem; font-style: normal; transition: transform 160ms ease; }
+.seating-event-card:hover .seating-event-card__footer > strong i { transform: translateX(3px); }
+
+.seating-picker-loading, .seating-picker-no-results, .seating-picker-empty { display: flex; min-height: 310px; flex-direction: column; align-items: center; justify-content: center; padding: 36px; text-align: center; }
+.seating-picker-loading { gap: 12px; border: 1px solid rgba(35, 29, 55, 0.09); border-radius: 20px 6px 20px 6px; background: rgba(255, 255, 255, 0.56); }
+.seating-picker-loading i { width: 31px; height: 31px; border: 3px solid rgba(103, 87, 217, 0.17); border-top-color: #6757d9; border-radius: 50%; animation: seating-spin 800ms linear infinite; }
+.seating-picker-loading p, .seating-picker-no-results p, .seating-picker-empty p { margin-top: 6px; color: #837c8b; font-size: 0.7rem; }
+.seating-picker-no-results > span, .seating-picker-empty > span { display: grid; width: 48px; height: 48px; margin-bottom: 13px; place-items: center; border-radius: 15px 5px 15px 5px; background: rgba(103, 87, 217, 0.09); color: #6757d9; font-size: 1.35rem; }
+.seating-picker-no-results strong, .seating-picker-empty strong { color: #211d2b; font-family: var(--font-display); font-size: 1rem; }
+.seating-picker-no-results button, .seating-picker-empty button { margin-top: 16px; border: 1px solid rgba(103, 87, 217, 0.25); border-radius: 11px 4px 11px 4px; background: rgba(103, 87, 217, 0.08); padding: 9px 13px; color: #6757d9; font-size: 0.65rem; font-weight: 760; }
+.seating-picker-empty { border: 1px dashed rgba(103, 87, 217, 0.25); border-radius: 20px 6px 20px 6px; background: rgba(255, 255, 255, 0.5); }
+@keyframes seating-spin { to { transform: rotate(360deg); } }
 
 /* ── Feedback ────────────────────────────────────────────────────────────── */
 .seating-alert {
@@ -496,9 +595,25 @@
 @media (max-width: 1024px) {
   .seating-layout { grid-template-columns: 1fr; }
   .seating-aside { position: static; }
+  .seating-picker-toolbar { grid-template-columns: minmax(240px, 1fr) auto; }
+  .seating-picker-toolbar > div:first-child { display: none; }
 }
 
 @media (max-width: 640px) {
+  .seating-picker-page { padding-bottom: 38px; }
+  .seating-picker-header { gap: 18px; }
+  .seating-picker-overview { width: 100%; }
+  .seating-picker-overview > div { min-width: 0; padding: 12px 10px; }
+  .seating-picker-overview strong { font-size: 1.1rem; }
+  .seating-picker-shell { margin-inline: -4px; border-radius: 17px 5px 17px 5px; }
+  .seating-picker-toolbar { grid-template-columns: 1fr; gap: 10px; padding: 13px; }
+  .seating-event-search { min-height: 40px; }
+  .seating-event-scopes { width: 100%; }
+  .seating-event-scopes button { flex: 1; justify-content: center; }
+  .seating-event-grid { grid-template-columns: 1fr; gap: 11px; padding: 12px; }
+  .seating-event-card { min-height: 284px; }
+  .seating-event-card__stats { margin-inline: 14px; }
+  .seating-event-card__footer { padding-inline: 14px; }
   .seating-page .admin-page__header { margin-bottom: 16px; }
   .seating-page .admin-page__description { display: none; }
 
@@ -595,8 +710,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .seating-section, .seating-table, .seating-event-card { transition: none; }
+  .seating-section, .seating-table, .seating-event-card, .seating-event-card__footer > strong i { transition: none; }
   .seating-event-card:hover { transform: none; }
+  .seating-picker-loading i { animation: none; }
 }
 
 /* Corner handle for resizing a section. */

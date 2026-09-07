@@ -25,6 +25,7 @@ const MAX_EXPORT_PIXELS = 20_000_000
 type ExportFormat = 'png' | 'pdf'
 type PlanPoint = { x: number; y: number }
 type RouteDrawing = { start: PlanPoint | null; preview: PlanPoint | null }
+type EventScope = 'all' | 'upcoming' | 'past'
 
 type SectionDraft = {
   kind: 'tables' | 'feature'
@@ -58,6 +59,23 @@ const DEFAULT_PATH_POINTS: SeatingPathPoint[] = [
   { x: 0.5, y: 0.5 },
   { x: 0.96, y: 0.5 },
 ]
+
+function formatEventDate(value: string) {
+  return new Date(value).toLocaleDateString('en-GB', {
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+  })
+}
+
+function eventTiming(event: Event) {
+  const eventDate = new Date(event.date)
+  const now = new Date()
+  const sameDay = eventDate.getFullYear() === now.getFullYear()
+    && eventDate.getMonth() === now.getMonth()
+    && eventDate.getDate() === now.getDate()
+  if (sameDay && !event.is_ended) return { label: 'Event today', tone: 'live' }
+  if (event.is_ended || eventDate.getTime() < now.getTime()) return { label: 'Past event', tone: 'past' }
+  return { label: 'Upcoming', tone: 'upcoming' }
+}
 
 /** Venue fixtures a planner can drop on the floor plan, with the shape each
  *  one usually takes in a real room. */
@@ -283,6 +301,8 @@ export default function SeatingPlanPage() {
   const [events, setEvents] = useState<Event[]>([])
   const [eventsLoading, setEventsLoading] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
+  const [eventSearch, setEventSearch] = useState('')
+  const [eventScope, setEventScope] = useState<EventScope>('all')
 
   const [sections, setSections] = useState<SeatingSection[]>([])
   const [loading, setLoading] = useState(false)
@@ -332,6 +352,31 @@ export default function SeatingPlanPage() {
       .catch(() => setError('Could not load your events.'))
       .finally(() => setEventsLoading(false))
   }, [pathEventId, router])
+
+  const eventCounts = useMemo(() => ({
+    all: events.length,
+    upcoming: events.filter((event) => eventTiming(event).tone !== 'past').length,
+    past: events.filter((event) => eventTiming(event).tone === 'past').length,
+  }), [events])
+
+  const visibleEvents = useMemo(() => {
+    const query = eventSearch.trim().toLocaleLowerCase()
+    return events
+      .filter((event) => {
+        const timing = eventTiming(event)
+        if (eventScope === 'upcoming' && timing.tone === 'past') return false
+        if (eventScope === 'past' && timing.tone !== 'past') return false
+        if (!query) return true
+        return `${event.name} ${event.venue} ${event.id}`.toLocaleLowerCase().includes(query)
+      })
+      .sort((a, b) => {
+        const aPast = eventTiming(a).tone === 'past'
+        const bPast = eventTiming(b).tone === 'past'
+        if (aPast !== bPast) return aPast ? 1 : -1
+        const difference = new Date(a.date).getTime() - new Date(b.date).getTime()
+        return aPast ? -difference : difference
+      })
+  }, [eventSearch, eventScope, events])
 
   const loadPlan = useCallback((eventId: number) => {
     setLoading(true)
@@ -1525,31 +1570,131 @@ export default function SeatingPlanPage() {
   // ── Event picker ──────────────────────────────────────────────────────────
   if (!selectedEvent) {
     return (
-      <div className="admin-page">
-        <div className="admin-page__header">
+      <div className="admin-page seating-picker-page">
+        <div className="admin-page__header seating-picker-header">
           <div className="admin-page__identity">
-            <p className="admin-page__eyebrow">Planning</p>
-            <h1 className="admin-page__title">Event planner</h1>
+            <p className="admin-page__eyebrow">Venue planning</p>
+            <h1 className="admin-page__title">Choose an event plan</h1>
             <p className="admin-page__description">
-              Map the full venue—from the gate and car park to internal areas, routes, tables, and exits.
-              Choose an event to open its plan.
+              Build the complete guest journey—from entrances and routes to tables, service areas and exits.
             </p>
           </div>
+          {!eventsLoading && events.length > 0 && (
+            <div className="seating-picker-overview" aria-label="Plan overview">
+              <div><strong>{events.length}</strong><span>Event plans</span></div>
+              <div><strong>{eventCounts.upcoming}</strong><span>Active</span></div>
+              <div><strong>{events.reduce((sum, event) => sum + (event.guest_count || 0), 0)}</strong><span>Guests</span></div>
+            </div>
+          )}
         </div>
 
-        {eventsLoading ? (
-          <p className="seating-empty">Loading events…</p>
-        ) : events.length === 0 ? (
-          <p className="seating-empty">No events yet. Create one first.</p>
-        ) : (
-          <div className="seating-event-grid">
-            {events.map((event) => (
-              <button key={event.id} className="seating-event-card" onClick={() => router.push(`/admin/seating-plan/${event.id}`)}>
-                <strong>{event.name}</strong>
-                <span>Plan #{event.id} · {new Date(event.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-              </button>
-            ))}
+        {error && (
+          <div className="seating-alert" role="alert">
+            {error}
+            <button onClick={() => setError('')} aria-label="Dismiss">×</button>
           </div>
+        )}
+
+        {eventsLoading ? (
+          <div className="seating-picker-loading" aria-live="polite">
+            <i />
+            <p>Loading event plans…</p>
+          </div>
+        ) : events.length === 0 ? (
+          <div className="seating-picker-empty">
+            <span aria-hidden="true">⌗</span>
+            <strong>Your planning room is ready</strong>
+            <p>Create an event, then return here to map its venue and seating.</p>
+            <button onClick={() => router.push('/admin/event-management/add')}>Create an event</button>
+          </div>
+        ) : (
+          <section className="seating-picker-shell">
+            <div className="seating-picker-toolbar">
+              <div>
+                <strong>Event plans</strong>
+                <span>Select a plan to continue editing</span>
+              </div>
+              <label className="seating-event-search">
+                <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="11" cy="11" r="7" /><path d="m16.5 16.5 4 4" />
+                </svg>
+                <input
+                  type="search"
+                  value={eventSearch}
+                  onChange={(event) => setEventSearch(event.target.value)}
+                  placeholder="Search event, venue or ID…"
+                  aria-label="Search event plans"
+                />
+              </label>
+              <div className="seating-event-scopes" role="group" aria-label="Filter event plans">
+                {([
+                  ['all', 'All plans', eventCounts.all],
+                  ['upcoming', 'Active', eventCounts.upcoming],
+                  ['past', 'Past', eventCounts.past],
+                ] as Array<[EventScope, string, number]>).map(([value, label, count]) => (
+                  <button
+                    key={value}
+                    className={eventScope === value ? 'is-active' : ''}
+                    onClick={() => setEventScope(value)}
+                    aria-pressed={eventScope === value}
+                  >
+                    {label}<span>{count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {visibleEvents.length === 0 ? (
+              <div className="seating-picker-no-results">
+                <span aria-hidden="true">⌕</span>
+                <strong>No matching plans</strong>
+                <p>Try another event name, venue, or plan ID.</p>
+                <button onClick={() => { setEventSearch(''); setEventScope('all') }}>Clear filters</button>
+              </div>
+            ) : (
+              <div className="seating-event-grid">
+                {visibleEvents.map((event) => {
+                  const timing = eventTiming(event)
+                  const date = new Date(event.date)
+                  const confirmed = event.confirmed_count || 0
+                  const guests = event.guest_count || 0
+                  return (
+                    <button
+                      key={event.id}
+                      className="seating-event-card"
+                      onClick={() => router.push(`/admin/seating-plan/${event.id}`)}
+                    >
+                      <span className="seating-event-card__accent" aria-hidden="true" />
+                      <span className="seating-event-card__topline">
+                        <span className="seating-event-id">Plan #{event.id}</span>
+                        <span className={`seating-event-status is-${timing.tone}`}><i />{timing.label}</span>
+                      </span>
+                      <span className="seating-event-card__body">
+                        <span className="seating-event-date" aria-hidden="true">
+                          <b>{date.toLocaleDateString('en-GB', { day: '2-digit' })}</b>
+                          <small>{date.toLocaleDateString('en-GB', { month: 'short' })}</small>
+                        </span>
+                        <span className="seating-event-card__identity">
+                          <strong>{event.name}</strong>
+                          <span>{formatEventDate(event.date)}</span>
+                          <span className="seating-event-venue">{event.venue || 'Venue not added'}</span>
+                        </span>
+                      </span>
+                      <span className="seating-event-card__stats">
+                        <span><b>{guests}</b><small>Registered guests</small></span>
+                        <span><b>{confirmed}</b><small>Confirmed</small></span>
+                        <span><b>{event.checked_in_count || 0}</b><small>Checked in</small></span>
+                      </span>
+                      <span className="seating-event-card__footer">
+                        <span>Venue map &amp; seating layout</span>
+                        <strong>Open plan <i aria-hidden="true">→</i></strong>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </section>
         )}
       </div>
     )
@@ -2415,7 +2560,10 @@ export default function SeatingPlanPage() {
                   <ul className="seating-guest-list">
                     {seating.assigned.map((guest) => (
                       <li key={guest.id}>
-                        <span>{guest.full_name}</span>
+                        <span>
+                          {guest.full_name}
+                          {guest.seat_number && <small>Seat {guest.seat_number}</small>}
+                        </span>
                         <button onClick={() => unseatGuest(guest.id)} aria-label={`Remove ${guest.full_name}`}>×</button>
                       </li>
                     ))}

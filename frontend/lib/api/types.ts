@@ -164,6 +164,23 @@ export interface Guest {
   registered_at: string;
 }
 
+/** Privacy-safe operational data returned to scanner and door-desk users. */
+export type CheckInGuest = Pick<Guest,
+  | 'id' | 'event' | 'event_name' | 'full_name' | 'ticket_type'
+  | 'table_number' | 'seat_number' | 'celebrant_name'
+  | 'status' | 'checked_in_at' | 'registered_at'
+  | 'plus_one_attending' | 'plus_one_checked_in'
+  | 'has_named_plus_one' | 'named_plus_one_name'
+> & {
+  seating_area: string;
+  service_preferences: Array<{
+    key: string;
+    label: string;
+    kind: RequirementKind;
+    value: string;
+  }>;
+};
+
 export interface GuestListStats {
   checked_in: number;
   pending: number;

@@ -1,6 +1,6 @@
 'use client'
 
-import { Guest } from '@/lib/api'
+import { CheckInGuest } from '@/lib/api'
 
 const TICKET_COLORS: Record<string, { bg: string; color: string; border: string }> = {
   vvip:    { bg: 'rgba(168,85,247,0.15)',  color: '#c084fc', border: 'rgba(168,85,247,0.3)' },
@@ -9,13 +9,12 @@ const TICKET_COLORS: Record<string, { bg: string; color: string; border: string 
 }
 
 export function GuestFoundScreen({
-  guest, checkingIn, onConfirm, onCancel, showPhone = false,
+  guest, checkingIn, onConfirm, onCancel,
 }: {
-  guest: Guest
+  guest: CheckInGuest
   checkingIn: boolean
   onConfirm: (target: 'guest' | 'plus_one' | 'both') => void
   onCancel: () => void
-  showPhone?: boolean
 }) {
   return (
     <div className="h-full overflow-auto flex flex-col px-4 py-8 max-w-lg mx-auto" style={{ background: 'var(--bg)' }}>
@@ -48,8 +47,8 @@ export function GuestFoundScreen({
         </div>
         <div className="grid grid-cols-2 divide-x divide-y" style={{ borderColor: 'var(--line)' }}>
           {([
-            showPhone ? { label: 'Phone', value: guest.phone_number || '—' } : null,
             { label: 'Registered', value: new Date(guest.registered_at).toLocaleDateString() },
+            { label: 'Area', value: guest.seating_area || '—' },
             { label: 'Table', value: guest.table_number || '—' },
             { label: 'Seat', value: guest.seat_number || '—' },
           ] as ({ label: string; value: string } | null)[]).filter((r): r is { label: string; value: string } => r !== null).map(({ label, value }) => (
@@ -61,6 +60,19 @@ export function GuestFoundScreen({
           {guest.celebrant_name && <div className="px-5 py-4" style={{ borderColor: 'var(--line)' }}><p className="mb-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-2)]">Celebrant</p><p className="text-sm font-semibold text-[var(--ink)]">{guest.celebrant_name}</p></div>}
           {guest.plus_one_attending && <div className="px-5 py-4" style={{ borderColor: 'var(--line)' }}><p className="mb-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-2)]">Plus one</p><p className="text-sm font-semibold text-[var(--ink)]">{guest.has_named_plus_one ? 'Separate pass and QR' : `Shared pass · ${guest.plus_one_checked_in ? 'checked in' : 'pending'}`}</p></div>}
         </div>
+        {guest.service_preferences.length > 0 && (
+          <div className="border-t px-5 py-4" style={{ borderColor: 'var(--line)' }}>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--brand)' }}>Service information</p>
+            <div className="mt-3 grid gap-2">
+              {guest.service_preferences.map((preference) => (
+                <div key={preference.key} className="flex items-start justify-between gap-4 text-sm">
+                  <span style={{ color: 'var(--muted)' }}>{preference.label}</span>
+                  <strong className="text-right" style={{ color: 'var(--ink)' }}>{preference.value}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="mb-3 grid w-full gap-2">
         {guest.status !== 'checked_in' && <button onClick={() => onConfirm('guest')} disabled={checkingIn} className="w-full rounded-sm py-4 text-sm font-semibold uppercase tracking-[0.06em] text-white disabled:opacity-60" style={{ background: 'var(--brand)' }}>{checkingIn ? 'Checking in…' : 'Check in guest only'}</button>}

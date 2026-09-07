@@ -3,7 +3,18 @@
 A plan for turning one-off guest questions into a feature event planners can
 configure themselves, with dashboards and vendor-ready exports.
 
-Status: proposal. Nothing here is built yet.
+Status: implemented through the vendor-service workflow.
+
+The generic requirement models, Aso Ebi backfill, event-level requirement
+builder, guest-facing RSVP/preferences collection, option collation, filtered
+guest roster, supplier CSV, table-grouped serving plan, complete catering PDF,
+and individual table PDF/PNG waiter cards are now built. Structured answers are
+also included in the privacy-safe check-in payload; free-text answers and
+contact details are deliberately excluded there.
+
+Remaining follow-up from this design: preference deadlines/locking, an optional
+answer-change audit history, and organization-level "copy from another event"
+convenience if repeated setup becomes a real user pain point.
 
 ---
 

@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 
 from ..models import Event, Guest
-from ..serializers import GuestSerializer, GuestListSerializer
+from ..serializers import CheckInGuestSerializer, GuestSerializer, GuestListSerializer
 from ..tasks import generate_guest_assets, send_whatsapp_pass, bulk_send_whatsapp_passes
 from accounts.permissions import (
     IsAuthenticatedAnyRole,
@@ -283,7 +283,7 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
                     status=status.HTTP_409_CONFLICT,
                 )
             guest.save(update_fields=update_fields)
-        return Response(GuestSerializer(guest, context={'request': request}).data)
+        return Response(CheckInGuestSerializer(guest, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='send_message')
     def send_message(self, request, pk=None):
@@ -329,4 +329,4 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
             guest = self.get_queryset().get(id=guest_id)
         except (Guest.DoesNotExist, ValueError):
             return Response({'detail': 'Invalid QR code.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response(GuestSerializer(guest, context={'request': request}).data)
+        return Response(CheckInGuestSerializer(guest, context={'request': request}).data)

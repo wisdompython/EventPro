@@ -432,6 +432,48 @@ class SeatingAssignmentTests(SeatingApiTestCase):
 
         self.guest.refresh_from_db()
         self.assertEqual(self.guest.table_number, self.table_label)
+        self.assertEqual(self.guest.seat_number, '1')
+
+    def test_assignment_uses_the_first_available_seat_number(self):
+        Guest.objects.create(
+            event=self.event,
+            full_name='First Guest',
+            table_number=self.table_label,
+            seat_number='1',
+        )
+        Guest.objects.create(
+            event=self.event,
+            full_name='Third Guest',
+            table_number=self.table_label,
+            seat_number='3',
+        )
+
+        response = self.client.post(
+            f'/api/seating-tables/{self.table_id}/assign/',
+            {'add': [str(self.guest.id)]}, format='json',
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.guest.refresh_from_db()
+        self.assertEqual(self.guest.seat_number, '2')
+
+    def test_assignment_rejects_a_full_table(self):
+        for seat in range(1, 9):
+            Guest.objects.create(
+                event=self.event,
+                full_name=f'Guest {seat}',
+                table_number=self.table_label,
+                seat_number=str(seat),
+            )
+
+        response = self.client.post(
+            f'/api/seating-tables/{self.table_id}/assign/',
+            {'add': [str(self.guest.id)]}, format='json',
+        )
+        self.assertEqual(response.status_code, 409, response.data)
+        self.guest.refresh_from_db()
+        self.assertEqual(self.guest.table_number, '')
+        self.assertEqual(self.guest.seat_number, '')
 
     def test_removing_clears_the_table_and_seat(self):
         self.guest.table_number = self.table_label
