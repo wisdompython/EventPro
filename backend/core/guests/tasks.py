@@ -1,5 +1,6 @@
 import logging
 from celery import shared_task
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F
 from django.db.models import Q
@@ -15,12 +16,25 @@ from .send_budget import (
 
 logger = logging.getLogger(__name__)
 
-# Max messages per second — stay well under Meta's rate limit
-# Meta allows ~80 messages/sec on higher tiers but 250/day on free tier.
-# 1 message every 3 seconds = ~1,200/hour, safe for all tiers.
-WHATSAPP_MESSAGES_PER_MINUTE = 20
+# Worker-level ceiling. Celery binds a task's rate_limit when the worker
+# imports this module, so this value cannot be made per-organization and
+# changing it needs a worker restart. It stays a safety ceiling set from the
+# environment; the per-organization pace is applied inside the task by
+# guests.pacing, which can only ever slow a send down relative to this.
+# Note the limit is applied per worker process: real throughput is this number
+# times the worker count (platform_ops.monitor reports the product).
+WHATSAPP_MESSAGES_PER_MINUTE = settings.WHATSAPP_WORKER_RATE_LIMIT_PER_MINUTE
 WHATSAPP_RATE_LIMIT = f'{WHATSAPP_MESSAGES_PER_MINUTE}/m'
 ASSET_BATCH_SIZE = 25
+
+
+def organization_id_for_event(event_id):
+    """Owning organization of an event, for per-tenant budget scoping."""
+    from .models import Event
+
+    return Event.objects.filter(pk=event_id).values_list(
+        'organization_id', flat=True,
+    ).first()
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60,
@@ -31,7 +45,7 @@ def send_whatsapp_pass(self, guest_id: str):
     from .whatsapp import send_pass
 
     try:
-        guest = Guest.objects.select_related('event__whatsapp_template').get(pk=guest_id)
+        guest = Guest.objects.select_related('event', 'event__whatsapp_template').get(pk=guest_id)
     except Guest.DoesNotExist:
         logger.warning("send_whatsapp_pass: guest %s not found", guest_id)
         return {'sent': False, 'reason': 'guest not found'}
@@ -47,6 +61,10 @@ def send_whatsapp_pass(self, guest_id: str):
     if not django_settings.WHATSAPP_PHONE_ID or not django_settings.WHATSAPP_TOKEN:
         logger.warning("WhatsApp not configured — skipping send for guest %s", guest_id)
         return {'sent': False, 'reason': 'not configured'}
+
+    # Per-organization pace, applied within the worker's rate-limit ceiling.
+    from .pacing import pace_send
+    pace_send(guest.event.organization_id if guest.event_id else None, channel='whatsapp')
 
     try:
         sent = send_pass(guest)
@@ -97,7 +115,7 @@ def bulk_send_whatsapp_passes(event_id: int, resend: bool = False, guest_ids: li
         guest_ids = [str(guest_id) for guest_id in qs]
 
     now = timezone.now()
-    budget = remaining_send_budget(now)
+    budget = remaining_send_budget(now, organization_id_for_event(event_id))
     to_send = guest_ids[:budget] if budget > 0 else []
     deferred = guest_ids[len(to_send):]
 
@@ -174,10 +192,13 @@ def _generate_guest_assets(guest_id: str, send_whatsapp: bool = True):
 
 
 def _dispatch_pass_sends(guest_ids) -> int:
-    """Send freshly generated passes within the daily budget.
+    """Send freshly generated passes within each organization's daily budget.
 
     Guests over the budget get scheduled_send_at=now so the Beat scheduler
-    delivers them once the trailing 24h window frees up.
+    delivers them once the trailing 24h window frees up. A batch can span
+    events (and therefore tenants), so budget is spent per organization —
+    one workspace running out must not defer another's sends. The grouping
+    is a single values() query, not a lookup per guest.
     """
     from .models import Guest
 
@@ -185,24 +206,34 @@ def _dispatch_pass_sends(guest_ids) -> int:
     if not guest_ids:
         return 0
     now = timezone.now()
-    budget = remaining_send_budget(now)
-    to_send = guest_ids[:budget] if budget > 0 else []
-    deferred = guest_ids[len(to_send):]
-    if to_send:
-        # Claim so the budget accounting counts these as in flight until sent.
-        Guest.objects.filter(id__in=to_send).update(scheduled_send_claimed_at=now)
-        for guest_id in to_send:
-            send_whatsapp_pass.delay(guest_id)
-    if deferred:
-        Guest.objects.filter(id__in=deferred).update(
-            scheduled_send_at=now,
-            scheduled_send_claimed_at=None,
-        )
-        logger.info(
-            'Deferred %s pass sends until the daily send window frees up',
-            len(deferred),
-        )
-    return len(to_send)
+
+    by_organization = {}
+    for guest_id, organization_id in Guest.objects.filter(
+        id__in=guest_ids,
+    ).values_list('id', 'event__organization_id'):
+        by_organization.setdefault(organization_id, []).append(str(guest_id))
+
+    sent_total = 0
+    for organization_id, organization_guest_ids in by_organization.items():
+        budget = remaining_send_budget(now, organization_id)
+        to_send = organization_guest_ids[:budget] if budget > 0 else []
+        deferred = organization_guest_ids[len(to_send):]
+        if to_send:
+            # Claim so the budget accounting counts these as in flight until sent.
+            Guest.objects.filter(id__in=to_send).update(scheduled_send_claimed_at=now)
+            for guest_id in to_send:
+                send_whatsapp_pass.delay(guest_id)
+        if deferred:
+            Guest.objects.filter(id__in=deferred).update(
+                scheduled_send_at=now,
+                scheduled_send_claimed_at=None,
+            )
+            logger.info(
+                'Deferred %s pass sends for organization %s until the daily '
+                'send window frees up', len(deferred), organization_id,
+            )
+        sent_total += len(to_send)
+    return sent_total
 
 
 @shared_task
@@ -506,6 +537,9 @@ def send_reminder(reminder_id: int, guest_id: str):
     if ReminderLog.objects.filter(reminder=reminder, guest=guest, success=True).exists():
         return {'sent': False, 'reason': 'already sent'}
 
+    from .pacing import pace_send
+    pace_send(reminder.event.organization_id, channel='whatsapp')
+
     success = wa_send_reminder(guest, reminder.template_name)
     if success:
         # The dispatcher usually pre-created the log row as its claim; flip it
@@ -536,12 +570,8 @@ def dispatch_scheduled_sends():
 
     now = timezone.now()
     stale_before = now - SCHEDULED_SEND_CLAIM_TIMEOUT
-    budget = remaining_send_budget(now)
-    if budget <= 0:
-        logger.info('dispatch_scheduled_sends: daily send budget exhausted')
-        return {'queued': 0}
 
-    eligible_ids = list(
+    eligible = (
         Guest.objects.filter(
             scheduled_send_at__isnull=False,
             scheduled_send_at__lte=now,
@@ -559,32 +589,55 @@ def dispatch_scheduled_sends():
             event__rsvp_enabled=False,
             event__date__gte=now,
         )
-        .values_list('id', flat=True)[:budget]
     )
 
-    if not eligible_ids:
+    # This Beat sweep spans every tenant, and each has its own messaging tier.
+    # Budget is therefore spent per organization: one workspace at its cap must
+    # not block another's scheduled sends. Organizations are read from the
+    # candidate rows themselves, so an idle tenant costs nothing.
+    organization_ids = list(
+        eligible.values_list('event__organization_id', flat=True).distinct()
+    )
+    if not organization_ids:
         return {'queued': 0}
 
-    # Atomically claim only the rows still matching (guards against a
-    # concurrent Beat run claiming the same guests between select and update).
-    Guest.objects.filter(
-        id__in=eligible_ids,
-        whatsapp_sent=False,
-    ).filter(
-        Q(scheduled_send_claimed_at__isnull=True) |
-        Q(scheduled_send_claimed_at__lt=stale_before)
-    ).update(scheduled_send_claimed_at=now)
+    queued_total = 0
+    for organization_id in organization_ids:
+        budget = remaining_send_budget(now, organization_id)
+        if budget <= 0:
+            logger.info(
+                'dispatch_scheduled_sends: daily send budget exhausted for '
+                'organization %s', organization_id,
+            )
+            continue
 
-    guest_ids = list(
-        Guest.objects.filter(id__in=eligible_ids, scheduled_send_claimed_at=now)
-        .values_list('id', flat=True)
-    )
+        eligible_ids = list(
+            eligible.filter(event__organization_id=organization_id)
+            .values_list('id', flat=True)[:budget]
+        )
+        if not eligible_ids:
+            continue
 
-    for guest_id in guest_ids:
-        send_whatsapp_pass.delay(str(guest_id))
+        # Atomically claim only the rows still matching (guards against a
+        # concurrent Beat run claiming the same guests between select and update).
+        Guest.objects.filter(
+            id__in=eligible_ids,
+            whatsapp_sent=False,
+        ).filter(
+            Q(scheduled_send_claimed_at__isnull=True) |
+            Q(scheduled_send_claimed_at__lt=stale_before)
+        ).update(scheduled_send_claimed_at=now)
 
-    logger.info("dispatch_scheduled_sends: queued %s scheduled sends", len(guest_ids))
-    return {'queued': len(guest_ids)}
+        guest_ids = list(
+            Guest.objects.filter(id__in=eligible_ids, scheduled_send_claimed_at=now)
+            .values_list('id', flat=True)
+        )
+        for guest_id in guest_ids:
+            send_whatsapp_pass.delay(str(guest_id))
+        queued_total += len(guest_ids)
+
+    logger.info("dispatch_scheduled_sends: queued %s scheduled sends", queued_total)
+    return {'queued': queued_total}
 
 
 @shared_task
@@ -610,17 +663,29 @@ def dispatch_due_reminders():
         .select_related('event')
     )
 
-    budget = remaining_send_budget(now)
+    # One budget per organization: this sweep spans every tenant, and each has
+    # its own messaging tier. Budgets are resolved lazily so a run that touches
+    # one workspace does not query for all of them.
+    budgets = {}
+
+    def budget_for(organization_id):
+        if organization_id not in budgets:
+            budgets[organization_id] = remaining_send_budget(now, organization_id)
+        return budgets[organization_id]
+
     claim_cutoff = now - REMINDER_CLAIM_TIMEOUT
 
     queued = 0
     for reminder in due_reminders:
+        organization_id = reminder.event.organization_id
+        budget = budget_for(organization_id)
         if budget <= 0:
             logger.info(
-                'dispatch_due_reminders: daily send budget exhausted; '
-                'remaining reminders resume on a later run',
+                'dispatch_due_reminders: daily send budget exhausted for '
+                'organization %s; remaining reminders resume on a later run',
+                organization_id,
             )
-            break
+            continue
         fire_at = reminder.event.date - timedelta(hours=reminder.hours_before)
         if now < fire_at:
             continue
@@ -678,7 +743,9 @@ def dispatch_due_reminders():
         for guest_id in claimed_ids:
             send_reminder.delay(reminder.id, str(guest_id))
         queued += len(claimed_ids)
-        budget -= len(claimed_ids)
+        # Write the spend back: the next reminder for this organization must
+        # see the reduced budget, and a different organization must not.
+        budgets[organization_id] = budget - len(claimed_ids)
 
     logger.info("dispatch_due_reminders: queued %s reminder sends", queued)
     return {'queued': queued}

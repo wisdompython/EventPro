@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { api, Event, SeatingFeature, SeatingPathPoint, SeatingSection, SeatingTable, SeatingTableGuests } from '@/lib/api'
+import { api, Event, Guest, SeatingFeature, SeatingPathPoint, SeatingSection, SeatingTable, SeatingTableGuests } from '@/lib/api'
 import { ConfirmDialog, ConfirmRequest } from '@/components/admin/ConfirmDialog'
 import './seating.css'
 
@@ -26,6 +26,11 @@ type ExportFormat = 'png' | 'pdf'
 type PlanPoint = { x: number; y: number }
 type RouteDrawing = { start: PlanPoint | null; preview: PlanPoint | null }
 type EventScope = 'all' | 'upcoming' | 'past'
+type GuestTrayFilter = 'unseated' | 'seated' | 'all'
+type SectionGeometry = Pick<SeatingSection, 'id' | 'x' | 'y' | 'width' | 'height'>
+type SeatingHistoryEntry =
+  | { kind: 'layout'; label: string; before: SectionGeometry[]; after: SectionGeometry[] }
+  | { kind: 'seat'; label: string; guestId: string; fromTableId: number | null; toTableId: number | null }
 
 type SectionDraft = {
   kind: 'tables' | 'feature'
@@ -294,6 +299,21 @@ function sectionSize(section: SeatingSection) {
   }
 }
 
+function geometryOf(section: SeatingSection): SectionGeometry {
+  return {
+    id: section.id,
+    x: section.x,
+    y: section.y,
+    width: section.width,
+    height: section.height,
+  }
+}
+
+function geometryChanged(before: SectionGeometry, after: SectionGeometry) {
+  return before.x !== after.x || before.y !== after.y
+    || before.width !== after.width || before.height !== after.height
+}
+
 export default function SeatingPlanPage() {
   const router = useRouter()
   const pathname = usePathname()
@@ -303,6 +323,16 @@ export default function SeatingPlanPage() {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
   const [eventSearch, setEventSearch] = useState('')
   const [eventScope, setEventScope] = useState<EventScope>('all')
+  const [guestRoster, setGuestRoster] = useState<Guest[]>([])
+  const [guestRosterLoading, setGuestRosterLoading] = useState(false)
+  const [guestSearch, setGuestSearch] = useState('')
+  const [guestTrayFilter, setGuestTrayFilter] = useState<GuestTrayFilter>('unseated')
+  const [guestTicketFilter, setGuestTicketFilter] = useState('')
+  const [draggingGuestId, setDraggingGuestId] = useState<string | null>(null)
+  const [dropTableId, setDropTableId] = useState<number | null>(null)
+  const [historyPast, setHistoryPast] = useState<SeatingHistoryEntry[]>([])
+  const [historyFuture, setHistoryFuture] = useState<SeatingHistoryEntry[]>([])
+  const [historyBusy, setHistoryBusy] = useState(false)
 
   const [sections, setSections] = useState<SeatingSection[]>([])
   const [loading, setLoading] = useState(false)
@@ -380,10 +410,29 @@ export default function SeatingPlanPage() {
 
   const loadPlan = useCallback((eventId: number) => {
     setLoading(true)
-    api.getSeatingSections(eventId)
+    return api.getSeatingSections(eventId)
       .then(setSections)
       .catch(() => setError('Could not load this plan.'))
       .finally(() => setLoading(false))
+  }, [])
+
+  const loadGuestRoster = useCallback((eventId: number) => {
+    setGuestRosterLoading(true)
+    return api.getGuests({ event: String(eventId), page_size: '200', ordering: 'name' })
+      .then(async (firstPage) => {
+        const pageCount = Math.ceil(firstPage.count / 200)
+        const remaining = pageCount > 1
+          ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => api.getGuests({
+              event: String(eventId),
+              page_size: '200',
+              page: String(index + 2),
+              ordering: 'name',
+            })))
+          : []
+        setGuestRoster([firstPage, ...remaining].flatMap((page) => page.results))
+      })
+      .catch(() => setError('Could not load guests for seating.'))
+      .finally(() => setGuestRosterLoading(false))
   }, [])
 
   useEffect(() => {
@@ -392,8 +441,15 @@ export default function SeatingPlanPage() {
     setSelectedTableId(null)
     setSelectedPathPoint(null)
     setSeating(null)
+    setGuestRoster([])
+    setGuestSearch('')
+    setGuestTrayFilter('unseated')
+    setGuestTicketFilter('')
+    setHistoryPast([])
+    setHistoryFuture([])
     loadPlan(selectedEvent.id)
-  }, [selectedEvent, loadPlan])
+    void loadGuestRoster(selectedEvent.id)
+  }, [selectedEvent, loadPlan, loadGuestRoster])
 
   const selectedSection = useMemo(
     () => sections.find((section) => section.id === selectedSectionId) ?? null,
@@ -406,6 +462,21 @@ export default function SeatingPlanPage() {
     }
     return null
   }, [sections, selectedTableId])
+
+  const ticketTypes = useMemo(
+    () => Array.from(new Set(guestRoster.map((guest) => guest.ticket_type).filter(Boolean))).sort(),
+    [guestRoster],
+  )
+
+  const visibleTrayGuests = useMemo(() => {
+    const term = guestSearch.trim().toLocaleLowerCase()
+    return guestRoster.filter((guest) => {
+      if (guestTrayFilter === 'unseated' && guest.table_number) return false
+      if (guestTrayFilter === 'seated' && !guest.table_number) return false
+      if (guestTicketFilter && guest.ticket_type !== guestTicketFilter) return false
+      return !term || `${guest.full_name} ${guest.table_number} ${guest.ticket_type}`.toLocaleLowerCase().includes(term)
+    })
+  }, [guestRoster, guestSearch, guestTicketFilter, guestTrayFilter])
 
   // Load the guest lists for whichever table is selected.
   useEffect(() => {
@@ -420,6 +491,174 @@ export default function SeatingPlanPage() {
   function showToast(message: string) {
     setToast(message)
     setTimeout(() => setToast(''), 2600)
+  }
+
+  function recordHistory(entry: SeatingHistoryEntry) {
+    setHistoryPast((current) => [...current.slice(-39), entry])
+    setHistoryFuture([])
+  }
+
+  function findTableById(tableId: number | null) {
+    if (tableId == null) return null
+    for (const section of sections) {
+      const table = section.tables.find((item) => item.id === tableId)
+      if (table) return { section, table }
+    }
+    return null
+  }
+
+  function findTableByLabel(label: string) {
+    for (const section of sections) {
+      const table = section.tables.find((item) => item.label.toLocaleLowerCase() === label.toLocaleLowerCase())
+      if (table) return { section, table }
+    }
+    return null
+  }
+
+  function cancelQueuedPositionSave() {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = null
+    movedSections.current.clear()
+    resizedSections.current.clear()
+  }
+
+  async function refreshPeopleAndPlan() {
+    if (!selectedEvent) return
+    await Promise.all([loadPlan(selectedEvent.id), loadGuestRoster(selectedEvent.id)])
+    if (selectedTableId != null) {
+      api.getSeatingTableGuests(selectedTableId).then(setSeating).catch(() => setSeating(null))
+    }
+  }
+
+  async function applyGeometry(snapshot: SectionGeometry[]) {
+    cancelQueuedPositionSave()
+    const byId = new Map(snapshot.map((item) => [item.id, item]))
+    setSections((current) => current.map((section) => ({ ...section, ...(byId.get(section.id) ?? {}) })))
+    await Promise.all(snapshot.map((item) => api.updateSeatingSection(item.id, {
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+    })))
+  }
+
+  async function applySeatTransition(
+    guestId: string,
+    currentTableId: number | null,
+    destinationTableId: number | null,
+  ) {
+    if (destinationTableId != null) {
+      await api.assignSeatingGuests(destinationTableId, [guestId])
+    } else if (currentTableId != null) {
+      await api.assignSeatingGuests(currentTableId, [], [guestId])
+    }
+    await refreshPeopleAndPlan()
+  }
+
+  async function undoPlannerChange() {
+    const entry = historyPast.at(-1)
+    if (!entry || historyBusy) return
+    setHistoryBusy(true)
+    setError('')
+    try {
+      if (entry.kind === 'layout') await applyGeometry(entry.before)
+      else await applySeatTransition(entry.guestId, entry.toTableId, entry.fromTableId)
+      setHistoryPast((current) => current.slice(0, -1))
+      setHistoryFuture((current) => [entry, ...current])
+      showToast(`Undid: ${entry.label}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not undo that change.')
+      if (selectedEvent) void loadPlan(selectedEvent.id)
+    } finally {
+      setHistoryBusy(false)
+    }
+  }
+
+  async function redoPlannerChange() {
+    const entry = historyFuture[0]
+    if (!entry || historyBusy) return
+    setHistoryBusy(true)
+    setError('')
+    try {
+      if (entry.kind === 'layout') await applyGeometry(entry.after)
+      else await applySeatTransition(entry.guestId, entry.fromTableId, entry.toTableId)
+      setHistoryFuture((current) => current.slice(1))
+      setHistoryPast((current) => [...current, entry])
+      showToast(`Redid: ${entry.label}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not redo that change.')
+      if (selectedEvent) void loadPlan(selectedEvent.id)
+    } finally {
+      setHistoryBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLocaleLowerCase() !== 'z') return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      event.preventDefault()
+      if (event.shiftKey) void redoPlannerChange()
+      else void undoPlannerChange()
+    }
+    window.addEventListener('keydown', handleShortcut)
+    return () => window.removeEventListener('keydown', handleShortcut)
+  }, [historyPast, historyFuture, historyBusy])
+
+  async function moveGuestToTable(guestId: string, destination: SeatingTable) {
+    const guest = guestRoster.find((item) => item.id === guestId)
+    if (!guest) return
+    const previous = guest.table_number ? findTableByLabel(guest.table_number) : null
+    if (previous?.table.id === destination.id) {
+      showToast(`${guest.full_name} is already at ${destination.label}`)
+      return
+    }
+    if ((destination.assigned ?? 0) >= destination.seats) {
+      setError(`${destination.label} is full. Move or remove a guest first.`)
+      return
+    }
+
+    setError('')
+    try {
+      await api.assignSeatingGuests(destination.id, [guestId])
+      recordHistory({
+        kind: 'seat',
+        label: `Seat ${guest.full_name} at ${destination.label}`,
+        guestId,
+        fromTableId: previous?.table.id ?? null,
+        toTableId: destination.id,
+      })
+      setSelectedSectionId(destination.section)
+      setSelectedTableId(destination.id)
+      await refreshPeopleAndPlan()
+      showToast(`${guest.full_name} seated at ${destination.label}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not seat ${guest.full_name}.`)
+    } finally {
+      setDraggingGuestId(null)
+      setDropTableId(null)
+    }
+  }
+
+  function startGuestDrag(event: React.DragEvent, guest: Guest | { id: string; full_name: string }) {
+    setDraggingGuestId(guest.id)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', guest.id)
+    event.dataTransfer.setData('application/x-event-pro-guest', guest.id)
+  }
+
+  function locateGuestTable(guest: Guest) {
+    if (!guest.table_number) return
+    const match = findTableByLabel(guest.table_number)
+    if (!match) {
+      setError(`${guest.table_number} is not on this venue plan.`)
+      return
+    }
+    setSelectedSectionId(match.section.id)
+    setSelectedTableId(match.table.id)
+    setSelectedPathPoint(null)
+    showToast(`${guest.full_name} is at ${match.table.label}`)
   }
 
   /** Batch position writes: a drag ends, we wait, then send everything moved. */
@@ -464,6 +703,8 @@ export default function SeatingPlanPage() {
     const bounds = canvas.getBoundingClientRect()
     const scale = bounds.width / plan.width
     const size = sectionSize(section)
+    const before = geometryOf(section)
+    let after = before
     const grabX = event.clientX - bounds.left - section.x * scale
     const grabY = event.clientY - bounds.top - section.y * scale
 
@@ -473,11 +714,15 @@ export default function SeatingPlanPage() {
       setSections((current) =>
         current.map((item) => (item.id === section.id ? { ...item, x, y } : item)),
       )
+      after = { ...after, x, y }
       movedSections.current.set(section.id, { x, y })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      if (geometryChanged(before, after)) {
+        recordHistory({ kind: 'layout', label: `Move ${section.name}`, before: [before], after: [after] })
+      }
       queuePositionSave()
     }
     window.addEventListener('pointermove', move)
@@ -504,6 +749,8 @@ export default function SeatingPlanPage() {
     const bounds = canvas.getBoundingClientRect()
     const scale = bounds.width / plan.width
     const start = sectionSize(section)
+    const before = geometryOf(section)
+    let after = before
     const originX = event.clientX
     const originY = event.clientY
 
@@ -513,11 +760,15 @@ export default function SeatingPlanPage() {
       setSections((current) =>
         current.map((item) => (item.id === section.id ? { ...item, width, height } : item)),
       )
+      after = { ...after, width, height }
       resizedSections.current.set(section.id, { width, height })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      if (geometryChanged(before, after)) {
+        recordHistory({ kind: 'layout', label: `Resize ${section.name}`, before: [before], after: [after] })
+      }
       queuePositionSave()
     }
     window.addEventListener('pointermove', move)
@@ -525,10 +776,12 @@ export default function SeatingPlanPage() {
   }
 
   function nudgeSection(section: SeatingSection, dx: number, dy: number) {
+    const before = geometryOf(section)
     const size = sectionSize(section)
     const x = clamp(section.x + dx, plan.width - size.width)
     const y = clamp(section.y + dy, plan.height - size.height)
     setSections((current) => current.map((item) => (item.id === section.id ? { ...item, x, y } : item)))
+    recordHistory({ kind: 'layout', label: `Move ${section.name}`, before: [before], after: [{ ...before, x, y }] })
     movedSections.current.set(section.id, { x, y })
     queuePositionSave()
   }
@@ -868,18 +1121,19 @@ export default function SeatingPlanPage() {
       void height
     }
 
-    setSections((current) =>
-      current.map((item) => {
-        const at = placed.get(item.id)
-        if (!at) return item
-        const resize = resizedSections.current.get(item.id)
-        if (item.kind === 'tables') {
-          // null size means "fit the tables", which is what arranging restores.
-          return { ...item, ...at, width: null, height: null }
-        }
-        return { ...item, ...at, ...(resize ?? {}) }
-      }),
-    )
+    const before = sections.map(geometryOf)
+    const arranged = sections.map((item) => {
+      const at = placed.get(item.id)
+      if (!at) return item
+      const resize = resizedSections.current.get(item.id)
+      if (item.kind === 'tables') {
+        // null size means "fit the tables", which is what arranging restores.
+        return { ...item, ...at, width: null, height: null }
+      }
+      return { ...item, ...at, ...(resize ?? {}) }
+    })
+    setSections(arranged)
+    recordHistory({ kind: 'layout', label: 'Auto-arrange plan', before, after: arranged.map(geometryOf) })
     for (const [id, at] of placed) movedSections.current.set(id, at)
     // Persist the size reset alongside the move.
     for (const item of tableSections) {
@@ -946,16 +1200,26 @@ export default function SeatingPlanPage() {
 
   async function seatGuest(guestId: string) {
     if (!selectedTable) return
-    await api.assignSeatingGuests(selectedTable.id, [guestId])
-    setSeating(await api.getSeatingTableGuests(selectedTable.id))
-    patchTable(selectedTable, { assigned: selectedTable.assigned + 1 })
+    await moveGuestToTable(guestId, selectedTable)
   }
 
   async function unseatGuest(guestId: string) {
     if (!selectedTable) return
-    await api.assignSeatingGuests(selectedTable.id, [], [guestId])
-    setSeating(await api.getSeatingTableGuests(selectedTable.id))
-    patchTable(selectedTable, { assigned: Math.max(0, selectedTable.assigned - 1) })
+    const guest = guestRoster.find((item) => item.id === guestId)
+    try {
+      await api.assignSeatingGuests(selectedTable.id, [], [guestId])
+      recordHistory({
+        kind: 'seat',
+        label: `Unseat ${guest?.full_name ?? 'guest'} from ${selectedTable.label}`,
+        guestId,
+        fromTableId: selectedTable.id,
+        toTableId: null,
+      })
+      await refreshPeopleAndPlan()
+      showToast(`${guest?.full_name ?? 'Guest'} moved to unseated`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not unseat that guest.')
+    }
   }
 
   /** The footprint occupied by placed items. This is deliberately separate
@@ -1711,6 +1975,26 @@ export default function SeatingPlanPage() {
           </p>
         </div>
         <div className="admin-page__actions">
+          <div className="seating-history-actions" aria-label="Plan history">
+            <button
+              type="button"
+              className="admin-secondary-action"
+              onClick={() => void undoPlannerChange()}
+              disabled={!historyPast.length || historyBusy}
+              title={historyPast.length ? `Undo ${historyPast.at(-1)?.label} (Ctrl+Z)` : 'Nothing to undo'}
+            >
+              ↶ Undo
+            </button>
+            <button
+              type="button"
+              className="admin-secondary-action"
+              onClick={() => void redoPlannerChange()}
+              disabled={!historyFuture.length || historyBusy}
+              title={historyFuture.length ? `Redo ${historyFuture[0].label} (Ctrl+Shift+Z)` : 'Nothing to redo'}
+            >
+              ↷ Redo
+            </button>
+          </div>
           {sections.length > 0 && (
             <button
               className="admin-secondary-action"
@@ -2112,6 +2396,7 @@ export default function SeatingPlanPage() {
                           `seating-table--${table.shape}`,
                           selectedTableId === table.id ? 'is-selected' : '',
                           (table.assigned ?? 0) >= table.seats ? 'is-full' : '',
+                          dropTableId === table.id ? ((table.assigned ?? 0) >= table.seats ? 'is-drop-blocked' : 'is-drop-target') : '',
                         ].filter(Boolean).join(' ')}
                         style={{
                           left: `${((layout.positions[index]?.x ?? table.x) + SECTION_PADDING) / size.width * 100}%`,
@@ -2120,6 +2405,26 @@ export default function SeatingPlanPage() {
                           aspectRatio: '1 / 1',
                         }}
                         onPointerDown={(event) => selectTable(event, section, table)}
+                        onDragEnter={(event) => {
+                          if (!draggingGuestId) return
+                          event.preventDefault()
+                          setDropTableId(table.id)
+                        }}
+                        onDragOver={(event) => {
+                          if (!draggingGuestId) return
+                          event.preventDefault()
+                          event.dataTransfer.dropEffect = (table.assigned ?? 0) >= table.seats ? 'none' : 'move'
+                        }}
+                        onDragLeave={(event) => {
+                          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTableId(null)
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault()
+                          const guestId = event.dataTransfer.getData('application/x-event-pro-guest')
+                            || event.dataTransfer.getData('text/plain')
+                          setDropTableId(null)
+                          if (guestId) void moveGuestToTable(guestId, table)
+                        }}
                       >
                         <span className="seating-table__seats" aria-hidden="true">
                           {Array.from({ length: table.seats }, (_, seatIndex) => {
@@ -2177,6 +2482,95 @@ export default function SeatingPlanPage() {
         </div>
 
         <aside className="seating-aside">
+          <section className="seating-panel seating-panel--guest-tray">
+            <div className="seating-panel__head">
+              <div>
+                <h2>Guest assignment</h2>
+                <p>Drag a guest onto any table</p>
+              </div>
+              <strong>{guestRoster.filter((guest) => !guest.table_number).length}<span> unseated</span></strong>
+            </div>
+
+            <label className="seating-guest-search">
+              <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="11" cy="11" r="7" /><path d="m16.5 16.5 4 4" />
+              </svg>
+              <input
+                type="search"
+                value={guestSearch}
+                onChange={(event) => setGuestSearch(event.target.value)}
+                placeholder="Search guest or table…"
+                aria-label="Search guests to seat"
+              />
+            </label>
+
+            <div className="seating-guest-filters" role="group" aria-label="Filter seating guests">
+              {([
+                ['unseated', 'Unseated'],
+                ['seated', 'Seated'],
+                ['all', 'All'],
+              ] as Array<[GuestTrayFilter, string]>).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={guestTrayFilter === value ? 'is-active' : ''}
+                  aria-pressed={guestTrayFilter === value}
+                  onClick={() => setGuestTrayFilter(value)}
+                >{label}</button>
+              ))}
+            </div>
+
+            {ticketTypes.length > 1 && (
+              <label className="seating-guest-ticket-filter">
+                <span>Ticket</span>
+                <select value={guestTicketFilter} onChange={(event) => setGuestTicketFilter(event.target.value)}>
+                  <option value="">All ticket types</option>
+                  {ticketTypes.map((ticket) => <option key={ticket} value={ticket}>{ticket}</option>)}
+                </select>
+              </label>
+            )}
+
+            {guestRosterLoading ? (
+              <p className="seating-muted seating-guest-tray__empty">Loading guests…</p>
+            ) : visibleTrayGuests.length ? (
+              <ul className="seating-guest-tray-list">
+                {visibleTrayGuests.slice(0, 80).map((guest) => (
+                  <li
+                    key={guest.id}
+                    draggable
+                    className={draggingGuestId === guest.id ? 'is-dragging' : ''}
+                    onDragStart={(event) => startGuestDrag(event, guest)}
+                    onDragEnd={() => { setDraggingGuestId(null); setDropTableId(null) }}
+                  >
+                    <span className={`seating-guest-status${guest.status === 'checked_in' ? ' is-arrived' : ''}`} aria-label={guest.status === 'checked_in' ? 'Checked in' : 'Not checked in'} />
+                    <span className="seating-guest-tray-list__identity">
+                      <b>{guest.full_name}</b>
+                      <small>{guest.table_number || guest.ticket_type || 'No table assigned'}</small>
+                    </span>
+                    {guest.table_number ? (
+                      <button type="button" onClick={() => locateGuestTable(guest)} title={`Show ${guest.table_number}`}>
+                        {guest.table_number}
+                      </button>
+                    ) : selectedTable ? (
+                      <button
+                        type="button"
+                        className="is-seat-action"
+                        onClick={() => void seatGuest(guest.id)}
+                        disabled={(selectedTable.assigned ?? 0) >= selectedTable.seats}
+                        title={`Seat at ${selectedTable.label}`}
+                      >+</button>
+                    ) : <i aria-hidden="true">⋮⋮</i>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="seating-muted seating-guest-tray__empty">
+                {guestSearch || guestTicketFilter ? 'No guests match these filters.' : guestTrayFilter === 'unseated' ? 'Everyone has a table.' : 'No guests to show.'}
+              </p>
+            )}
+            {visibleTrayGuests.length > 80 && <p className="seating-guest-tray__more">Showing the first 80 matches. Search to narrow the list.</p>}
+          </section>
+
           <section className="seating-panel seating-panel--canvas">
             <div className="seating-panel__head">
               <h2>Canvas size</h2>
@@ -2559,7 +2953,13 @@ export default function SeatingPlanPage() {
                 ) : seating && seating.assigned.length > 0 ? (
                   <ul className="seating-guest-list">
                     {seating.assigned.map((guest) => (
-                      <li key={guest.id}>
+                      <li
+                        key={guest.id}
+                        draggable
+                        className={draggingGuestId === guest.id ? 'is-dragging' : ''}
+                        onDragStart={(event) => startGuestDrag(event, guest)}
+                        onDragEnd={() => { setDraggingGuestId(null); setDropTableId(null) }}
+                      >
                         <span>
                           {guest.full_name}
                           {guest.seat_number && <small>Seat {guest.seat_number}</small>}
@@ -2570,26 +2970,6 @@ export default function SeatingPlanPage() {
                   </ul>
                 ) : (
                   <p className="seating-muted">Nobody seated here yet.</p>
-                )}
-
-                <h3>Unseated guests</h3>
-                {seating && seating.unassigned.length > 0 ? (
-                  <ul className="seating-guest-list seating-guest-list--add">
-                    {seating.unassigned.slice(0, 40).map((guest) => (
-                      <li key={guest.id}>
-                        <span>{guest.full_name}</span>
-                        <button
-                          onClick={() => seatGuest(guest.id)}
-                          disabled={(seating.assigned.length ?? 0) >= selectedTable.seats}
-                          aria-label={`Seat ${guest.full_name}`}
-                        >
-                          +
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="seating-muted">Everyone has a table.</p>
                 )}
               </div>
             </section>

@@ -134,8 +134,24 @@ export default function QueueMonitorPage() {
           <SummaryCard label="Messages pending" value={messageQueue?.pending ?? '—'} note={snapshot.broker.available ? 'Waiting in the Redis messages queue' : 'Broker unavailable'} danger={(messageQueue?.pending ?? 0) > 100} />
           <SummaryCard label="Workers online" value={onlineWorkers} note={`${snapshot.workers.workers.length} worker node${snapshot.workers.workers.length === 1 ? '' : 's'} detected`} danger={onlineWorkers === 0} />
           <SummaryCard label="Tasks active" value={activeTasks} note={`${snapshot.workers.tasks.length} active, reserved, or scheduled`} />
-          <SummaryCard label="24h send budget" value={`${snapshot.send_budget.remaining}/${snapshot.send_budget.daily_limit}`} note={`${snapshot.message_rate.estimated_global_ceiling_per_minute}/min estimated message ceiling`} danger={snapshot.send_budget.remaining === 0} />
+          <SummaryCard label="24h send budget" value={`${snapshot.send_budget.total_remaining}/${snapshot.send_budget.total_daily_limit}`} note={`Across ${snapshot.send_budget.organizations.length} workspace${snapshot.send_budget.organizations.length === 1 ? '' : 's'} · ${snapshot.message_rate.estimated_global_ceiling_per_minute}/min estimated message ceiling`} danger={snapshot.send_budget.organizations.some((row) => row.remaining === 0)} />
         </div>
+
+        {snapshot.send_budget.organizations.length > 0 && (
+          <section className="mt-5 rounded-xl p-5" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
+            <h2 className="text-sm font-semibold">Send budget by workspace</h2>
+            <p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>Each workspace has its own Meta messaging tier and its own rolling 24-hour budget. Lowest remaining first.</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {snapshot.send_budget.organizations.map((row) => (
+                <div key={row.organization_id} className="rounded-lg px-3 py-3" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
+                  <p className="text-xs font-semibold" style={{ color: 'var(--ink)' }}>{row.organization}</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums" style={{ color: row.remaining === 0 ? 'var(--danger)' : 'var(--ink)' }}>{row.remaining}<span className="text-xs font-medium" style={{ color: 'var(--muted)' }}> / {row.daily_limit}</span></p>
+                  <p className="mt-0.5 text-[11px]" style={{ color: 'var(--muted)' }}>{row.remaining === 0 ? 'Budget exhausted — sends resume as the window rolls' : 'sends left in the rolling 24h window'}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <div className="mt-5 grid gap-5 xl:grid-cols-2">
           <section className="rounded-xl p-5" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>

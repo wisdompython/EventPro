@@ -147,7 +147,62 @@ def _resolve_template_params(guest, body_params: list) -> list:
         'seat_number':  guest.seat_number or '',
         'preferences_link': build_preferences_url(guest),
     }
+    var_map.update(_location_vars(event))
     return [var_map.get(key, '') for key in body_params]
+
+
+def _format_location_time(starts_at) -> str:
+    """`25th June 2026, 11:00 AM` — the date matters when stops span days."""
+    if not starts_at:
+        return ''
+    local_value = timezone.localtime(starts_at)
+    time_part = local_value.strftime('%I:%M %p').lstrip('0')
+    return f'{_format_ordinal_date(starts_at)}, {time_part}'
+
+
+def _location_vars(event) -> dict:
+    """Resolve `schedule` and the indexed `location_N_*` template variables.
+
+    An event with no locations falls back to its own venue/date, so a template
+    written for a multi-stop wedding still renders sensibly for a single-venue
+    dinner instead of leaving blanks mid-sentence.
+    """
+    from .models import WhatsAppTemplate
+
+    stops = []
+    if event is not None:
+        stops = [
+            {
+                'name': location.name,
+                'venue': location.venue,
+                'time': _format_location_time(location.starts_at),
+            }
+            for location in event.locations.all()
+        ]
+        if not stops and (event.venue or event.date):
+            stops = [{
+                'name': '',
+                'venue': event.venue or '',
+                'time': _format_location_time(event.date),
+            }]
+
+    lines = []
+    for stop in stops:
+        # "Church: St Mary's, 25th June 2026, 11:00 AM", skipping empty parts
+        # so a stop with no venue or no confirmed time still reads cleanly.
+        detail = ', '.join(part for part in (stop['venue'], stop['time']) if part)
+        if stop['name'] and detail:
+            lines.append(f"{stop['name']}: {detail}")
+        elif stop['name'] or detail:
+            lines.append(stop['name'] or detail)
+
+    resolved = {'schedule': '\n'.join(lines)}
+    for index in range(WhatsAppTemplate.MAX_TEMPLATE_LOCATIONS):
+        stop = stops[index] if index < len(stops) else {'name': '', 'venue': '', 'time': ''}
+        resolved[f'location_{index + 1}_name'] = stop['name']
+        resolved[f'location_{index + 1}_venue'] = stop['venue']
+        resolved[f'location_{index + 1}_time'] = stop['time']
+    return resolved
 
 
 def _format_ordinal_date(value) -> str:

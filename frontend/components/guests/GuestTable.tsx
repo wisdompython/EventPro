@@ -24,6 +24,20 @@ function GuestCard({ g, isSel, deleting, showPhone, onToggleSelect, onDelete }: 
 }) {
   const initials = g.full_name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
   const checkedIn = g.status === 'checked_in'
+  const rsvpLabel = g.rsvp_response_status === 'confirmed' ? 'CONFIRMED'
+    : g.rsvp_response_status === 'declined' ? 'DECLINED'
+      : g.rsvp_invitation_status === 'failed' ? 'DELIVERY FAILED'
+        : g.rsvp_response_status === 'awaiting' && (g.rsvp_invitation_status === 'delivered' || g.rsvp_invitation_status === 'read') ? 'AWAITING'
+          : g.rsvp_response_status === 'awaiting' ? 'NOT DELIVERED' : null
+  const badgeStyle = checkedIn
+    ? { background: 'var(--brand-soft)', color: 'var(--brand)' }
+    : rsvpLabel === 'CONFIRMED'
+      ? { background: 'var(--success-bg)', color: 'var(--success)' }
+      : rsvpLabel === 'DECLINED' || rsvpLabel === 'DELIVERY FAILED'
+        ? { background: 'rgba(239,68,68,0.14)', color: 'var(--danger)' }
+        : rsvpLabel === 'NOT DELIVERED'
+          ? { background: 'var(--chip)', color: 'var(--muted)' }
+          : { background: 'rgba(245,158,11,0.14)', color: 'var(--warn)' }
 
   return (
     <div className="flex items-start gap-3 px-4 py-3.5 transition"
@@ -37,11 +51,8 @@ function GuestCard({ g, isSel, deleting, showPhone, onToggleSelect, onDelete }: 
           <Link href={`/admin/guestbook/${g.id}`} className="text-sm font-semibold hover:underline truncate"
             style={{ color: 'var(--ink)' }}>{g.full_name}</Link>
           <span className="flex-shrink-0 px-2 py-0.5 text-[10px] font-bold"
-            style={{
-              background: checkedIn ? 'var(--brand-soft)' : 'rgba(245,158,11,0.14)',
-              color: checkedIn ? 'var(--brand)' : 'var(--warn)',
-            }}>
-            {checkedIn ? 'IN' : 'PENDING'}
+            style={badgeStyle}>
+            {checkedIn ? 'IN' : rsvpLabel ?? 'PENDING'}
           </span>
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]" style={{ color: 'var(--muted)' }}>

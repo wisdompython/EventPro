@@ -1,5 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from .messaging_views import MessagingSettingsAuditView, MessagingSettingsView
 from .views import (
     OrganizationViewSet,
     UserViewSet,
@@ -26,5 +27,7 @@ urlpatterns = [
     path('password/change/', password_change_view),
     path('password/reset/', password_reset_request_view),
     path('password/reset/confirm/', password_reset_confirm_view),
+    path('messaging-settings/', MessagingSettingsView.as_view()),
+    path('messaging-settings/audit/', MessagingSettingsAuditView.as_view()),
     path('', include(router.urls)),
 ]

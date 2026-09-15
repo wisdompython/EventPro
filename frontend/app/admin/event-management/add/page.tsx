@@ -158,6 +158,10 @@ export default function AddEventPage() {
     fd.append('name', fieldValue(form, 'name'))
     fd.append('date', watDateTimeInputToIso(fieldValue(form, 'date')))
     fd.append('venue', fieldValue(form, 'venue'))
+    // Schedule for multi-location events; empty means the organiser never
+    // opened the section, so the field is omitted rather than clearing it.
+    const locationsSetup = fieldValue(form, 'locations_setup')
+    if (locationsSetup) fd.append('locations_setup', locationsSetup)
     fd.append('description', fieldValue(form, 'description'))
     fd.append('rsvp_message', usesRsvp ? fieldValue(form, 'rsvp_message') : '')
     fd.append('color_of_day', usesRsvp ? fieldValue(form, 'color_of_day') : '')

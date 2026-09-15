@@ -207,6 +207,49 @@ class Event(models.Model):
         return self.aso_ebi_unit.strip() or 'yards'
 
 
+class EventLocation(models.Model):
+    """One named stop in an event's schedule — "Church", "Reception".
+
+    A wedding runs across several places at several times; a corporate dinner
+    has one. Event.date and Event.venue remain the event's headline (and are
+    what every dispatcher, budget sweep and liveness check reads), so an event
+    with no locations behaves exactly as it always has. Organisers add
+    locations only when their event actually needs them.
+    """
+
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name='locations',
+    )
+    name = models.CharField(
+        max_length=120,
+        help_text='What the organiser calls this stop — "Church", "Reception".',
+    )
+    venue = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Address guests should travel to.',
+    )
+    starts_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When this part of the event begins. Blank means "time to be confirmed".',
+    )
+    sort_order = models.PositiveIntegerField(
+        default=0,
+        help_text='Order shown to guests; the schedule reads top to bottom.',
+    )
+
+    class Meta:
+        # Ordered by the organiser's own arrangement, not by time: a stop whose
+        # time is still to be confirmed must not jump to the front.
+        ordering = ['sort_order', 'id']
+
+    def __str__(self):
+        return f'{self.name} · {self.event.name}'
+
+
 class Guest(models.Model):
     class Status(models.TextChoices):
         REGISTERED = 'registered', 'Registered'
@@ -549,7 +592,25 @@ class WhatsAppTemplate(models.Model):
         ('rsvp_link',   'Guest-specific RSVP link'),
         ('preferences_link', 'Guest preferences link'),
         ('rsvp_deadline', 'RSVP response deadline'),
+        # Multi-location events (weddings: church + reception). `schedule` is
+        # the whole list pre-joined into one parameter, which suits a template
+        # whose placeholder count is fixed at approval time. The indexed keys
+        # are for templates that lay each stop out in its own placeholder;
+        # they resolve to '' when the event has fewer locations.
+        ('schedule',    'Full schedule (all locations and times)'),
+        ('location_1_name',  'Location 1 name'),
+        ('location_1_venue', 'Location 1 venue'),
+        ('location_1_time',  'Location 1 time'),
+        ('location_2_name',  'Location 2 name'),
+        ('location_2_venue', 'Location 2 venue'),
+        ('location_2_time',  'Location 2 time'),
+        ('location_3_name',  'Location 3 name'),
+        ('location_3_venue', 'Location 3 venue'),
+        ('location_3_time',  'Location 3 time'),
     ]
+
+    #: How many indexed location_N_* variable sets AVAILABLE_VARS exposes.
+    MAX_TEMPLATE_LOCATIONS = 3
 
     organization = models.ForeignKey(
         'accounts.Organization',

@@ -10,6 +10,42 @@ import './preferences.css'
  *  shows both, from a single fetch, so the two can never disagree. */
 type AnsweredFilter = '' | 'yes' | 'no'
 type EventScope = 'all' | 'upcoming' | 'past'
+type DashboardView = 'overview' | 'tables' | 'guests'
+
+const MEAL_WORDS = /\b(meal|menu|food|dish|main course|protein|soup|swallow)\b/i
+
+function isMealQuestion(question: { key?: string; label: string }) {
+  return MEAL_WORDS.test(`${question.key ?? ''} ${question.label}`)
+}
+
+function completeMealLabel(values: string[]) {
+  const selections = values
+    .flatMap((value) => value.split(','))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, all) => all.findIndex((item) => item.toLocaleLowerCase() === value.toLocaleLowerCase()) === index)
+
+  if (selections.length < 2) return selections[0] ?? ''
+  if (selections.length === 2) return `${selections[0]} with ${selections[1]}`
+  return `${selections[0]} with ${selections.slice(1, -1).join(', ')} and ${selections.at(-1)}`
+}
+
+/** Table service must count plates, not isolated components. A guest who chose
+ *  jollof rice, chicken and beef therefore contributes one complete meal. */
+function getMealOrders(table: PreferenceSeatingTable) {
+  const counts = new Map<string, { label: string; count: number }>()
+  for (const guest of table.guests) {
+    const label = completeMealLabel(
+      guest.answers.filter(isMealQuestion).map((answer) => answer.value),
+    )
+    if (!label) continue
+    const key = label.toLocaleLowerCase()
+    const current = counts.get(key)
+    if (current) current.count += 1
+    else counts.set(key, { label, count: 1 })
+  }
+  return Array.from(counts.values()).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+}
 
 function formatDate(value: string | null) {
   if (!value) return null
@@ -88,6 +124,8 @@ export default function PreferencesPage() {
   const [eventSearch, setEventSearch] = useState('')
   const [eventScope, setEventScope] = useState<EventScope>('all')
   const [exporting, setExporting] = useState('')
+  const [serviceTableIndex, setServiceTableIndex] = useState<number | null>(null)
+  const [dashboardView, setDashboardView] = useState<DashboardView>('overview')
 
   useEffect(() => {
     setEventsLoading(true)
@@ -131,6 +169,20 @@ export default function PreferencesPage() {
     }, 15_000)
     return () => window.clearInterval(timer)
   }, [selectedEvent, data, search, answered])
+
+  useEffect(() => {
+    if (serviceTableIndex === null) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setServiceTableIndex(null)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [serviceTableIndex])
 
   const responseRate = useMemo(() => {
     if (!data || !data.summary.total) return 0
@@ -245,7 +297,13 @@ export default function PreferencesPage() {
       rows.push(['TABLE SERVICE PLAN'])
       rows.push(['Section', 'Table', 'Question', 'Option or total', 'Count', 'Unit'])
       for (const table of data.seating) {
-        for (const question of table.totals) {
+        for (const order of getMealOrders(table)) {
+          rows.push([
+            table.section_name, table.table_label, 'Complete meal',
+            order.label, order.count, '',
+          ])
+        }
+        for (const question of table.totals.filter((item) => !isMealQuestion(item))) {
           if (question.kind === 'quantity') {
             rows.push([
               table.section_name, table.table_label, question.label,
@@ -367,11 +425,35 @@ export default function PreferencesPage() {
         const tableSubtitle = `${table.guest_count}${table.seats ? ` of ${table.seats}` : ''} guests - ${table.checked_in_count} checked in - ${table.responded_count} preferences received`
         pageHeader(table.section_name, table.table_label, tableSubtitle)
 
+        const mealOrders = getMealOrders(table)
         pdf.setTextColor(...purple)
         pdf.setFont('helvetica', 'bold')
         pdf.setFontSize(11)
-        pdf.text('TABLE TOTALS', margin, 56)
-        addQuestionRows(table.totals, margin, 66, 76)
+        pdf.text('COMPLETE MEAL ORDERS', margin, 56)
+        let tableSummaryY = 66
+        pdf.setFontSize(8.5)
+        if (mealOrders.length) {
+          for (const order of mealOrders) {
+            const lines = pdf.splitTextToSize(`${order.count} x ${order.label}`, 76)
+            pdf.setTextColor(...ink)
+            pdf.text(lines, margin, tableSummaryY)
+            tableSummaryY += lines.length * 4 + 3
+          }
+        } else {
+          pdf.setTextColor(...muted)
+          pdf.setFont('helvetica', 'normal')
+          pdf.text('No meal selections received', margin, tableSummaryY)
+          tableSummaryY += 8
+        }
+
+        const otherTotals = table.totals.filter((question) => !isMealQuestion(question))
+        if (otherTotals.length) {
+          pdf.setTextColor(...purple)
+          pdf.setFont('helvetica', 'bold')
+          pdf.setFontSize(9)
+          pdf.text('OTHER REQUIREMENTS', margin, tableSummaryY + 3)
+          addQuestionRows(otherTotals, margin, tableSummaryY + 11, 76)
+        }
 
         const guestX = 105
         const guestWidth = pageWidth - guestX - margin
@@ -471,14 +553,11 @@ export default function PreferencesPage() {
   }
 
   async function exportTablePng(table: PreferenceSeatingTable, index: number) {
-    const source = document.getElementById(`pref-service-table-${index}`)
+    const source = document.getElementById(`pref-service-modal-panel-${index}`)
     if (!source || !selectedEvent) return
     setExporting(`table-${index}`)
     setError('')
-    const details = source.querySelector('details')
-    const wasOpen = details?.open ?? false
     try {
-      if (details) details.open = true
       source.classList.add('is-exporting')
       const { toBlob } = await import('html-to-image')
       const blob = await toBlob(source, {
@@ -492,7 +571,6 @@ export default function PreferencesPage() {
       setError(err instanceof Error ? err.message : 'Could not create the table image.')
     } finally {
       source.classList.remove('is-exporting')
-      if (details) details.open = wasOpen
       setExporting('')
     }
   }
@@ -579,6 +657,7 @@ export default function PreferencesPage() {
                       className="pref-event-card"
                       onClick={() => {
                         setSelectedEvent(event)
+                        setDashboardView('overview')
                         router.push(`/admin/preferences/${event.id}`)
                       }}
                     >
@@ -633,40 +712,11 @@ export default function PreferencesPage() {
         </div>
         <div className="pref-dashboard-hero__actions">
           <button
-            className="pref-hero-action is-primary"
-            onClick={() => exportServicePackPdf()}
-            disabled={!data || exporting === 'pdf'}
-          >
-            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" />
-            </svg>
-            {exporting === 'pdf' ? 'Building table cards…' : 'All table cards PDF'}
-          </button>
-          <button
-            className="pref-hero-action"
-            onClick={exportSupplierSummaryCsv}
-            disabled={!data}
-          >
-            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" />
-            </svg>
-            Supplier totals CSV
-          </button>
-          <button
-            className="pref-hero-action"
-            onClick={exportResponsesCsv}
-            disabled={!data || data.guests.length === 0}
-          >
-            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" />
-            </svg>
-            Export guest detail
-          </button>
-          <button
             className="pref-hero-action"
             onClick={() => {
               setSelectedEvent(null)
               setData(null)
+              setDashboardView('overview')
               router.push('/admin/preferences')
             }}
           >
@@ -687,7 +737,56 @@ export default function PreferencesPage() {
 
       {data && (
         <>
-          <section className="pref-overview" aria-label="Preference response overview">
+          <section className="pref-dashboard-nav" aria-label="Preference dashboard views">
+            <div className="pref-view-tabs" role="tablist" aria-label="Choose dashboard view">
+              {([
+                ['overview', 'Overview', `${data.questions.length} totals`],
+                ['tables', 'Table service', `${data.seating.length} tables`],
+                ['guests', 'Guest responses', `${data.guests.length} guests`],
+              ] as Array<[DashboardView, string, string]>).map(([value, label, count]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={dashboardView === value}
+                  aria-controls={`pref-view-${value}`}
+                  className={dashboardView === value ? 'is-active' : ''}
+                  onClick={() => {
+                    setDashboardView(value)
+                    setServiceTableIndex(null)
+                  }}
+                >
+                  <span>{label}</span>
+                  <small>{count}</small>
+                </button>
+              ))}
+            </div>
+
+            <details className="pref-export-menu">
+              <summary>
+                <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" />
+                </svg>
+                Export
+              </summary>
+              <div>
+                <button onClick={() => exportServicePackPdf()} disabled={exporting === 'pdf'}>
+                  <b>Table service pack</b>
+                  <span>{exporting === 'pdf' ? 'Building PDF…' : 'Complete PDF for floor staff'}</span>
+                </button>
+                <button onClick={exportSupplierSummaryCsv}>
+                  <b>Supplier totals</b>
+                  <span>CSV for catering and vendors</span>
+                </button>
+                <button onClick={exportResponsesCsv} disabled={data.guests.length === 0}>
+                  <b>Guest details</b>
+                  <span>Every response as CSV</span>
+                </button>
+              </div>
+            </details>
+          </section>
+
+          {dashboardView === 'overview' && <section id="pref-view-overview" role="tabpanel" className="pref-overview" aria-label="Preference response overview">
             <article className="pref-response-card">
               <div className="pref-response-card__copy">
                 <span className="pref-overview-label">Response progress</span>
@@ -709,7 +808,7 @@ export default function PreferencesPage() {
                 <span className="pref-kpi-icon" aria-hidden="true">{data.summary.outstanding ? '!' : '✓'}</span>
                 <div><small>Outstanding</small><strong>{data.summary.outstanding}</strong></div>
                 {data.summary.outstanding > 0
-                  ? <button onClick={() => setAnswered('no')}>View guests →</button>
+                  ? <button onClick={() => { setAnswered('no'); setDashboardView('guests') }}>View guests →</button>
                   : <span className="pref-kpi-note">Up to date</span>}
               </article>
               <article>
@@ -730,10 +829,10 @@ export default function PreferencesPage() {
                 </article>
               )}
             </div>
-          </section>
+          </section>}
 
-          {data.questions.length > 0 && (
-            <section className="pref-section pref-question-section">
+          {dashboardView === 'overview' && data.questions.length > 0 && (
+            <section className="pref-section pref-question-section" aria-label="Supplier planning totals">
               <div className="pref-section-heading">
                 <div>
                   <p>Supplier planning</p>
@@ -803,8 +902,8 @@ export default function PreferencesPage() {
             </section>
           )}
 
-          {data.seating.length > 0 && (
-            <section className="pref-section pref-service-section">
+          {dashboardView === 'tables' && data.seating.length > 0 && (
+            <section id="pref-view-tables" role="tabpanel" className="pref-section pref-service-section">
               <div className="pref-section-heading">
                 <div>
                   <p>Floor service</p>
@@ -824,9 +923,9 @@ export default function PreferencesPage() {
                     <div className="pref-service-grid">
                       {group.tables.map((table) => {
                         const index = data.seating.indexOf(table)
+                        const mealOrders = getMealOrders(table)
                         return (
                           <article
-                            id={`pref-service-table-${index}`}
                             key={`${table.section_name}-${table.table_label}`}
                             className={`pref-service-card${table.unassigned ? ' is-unassigned' : ''}`}
                           >
@@ -835,24 +934,14 @@ export default function PreferencesPage() {
                                 <span>{table.section_name}</span>
                                 <h4>{table.table_label}</h4>
                               </div>
-                              <div className="pref-service-card__exports">
-                                <button
-                                  className="pref-service-card__export"
-                                  onClick={() => exportServicePackPdf(table, index)}
-                                  disabled={Boolean(exporting)}
-                                  title={`Download ${table.table_label} waiter card as PDF`}
-                                >
-                                  {exporting === `table-pdf-${index}` ? 'Saving…' : 'PDF'}
-                                </button>
-                                <button
-                                  className="pref-service-card__export"
-                                  onClick={() => exportTablePng(table, index)}
-                                  disabled={Boolean(exporting)}
-                                  title={`Download ${table.table_label} waiter card as PNG`}
-                                >
-                                  {exporting === `table-${index}` ? 'Saving…' : 'PNG'}
-                                </button>
-                              </div>
+                              <button
+                                type="button"
+                                className="pref-service-card__open-top"
+                                onClick={() => setServiceTableIndex(index)}
+                                aria-label={`Open service details for ${table.table_label}`}
+                              >
+                                View <span aria-hidden="true">↗</span>
+                              </button>
                             </header>
 
                             <div className="pref-service-stats">
@@ -863,57 +952,30 @@ export default function PreferencesPage() {
                               </span>
                             </div>
 
-                            {table.totals.length > 0 ? (
-                              <div className="pref-service-totals">
-                                {table.totals.map((question) => (
-                                  <div key={question.id}>
-                                    <span>{question.label}</span>
-                                    <ul>
-                                      {question.kind === 'quantity' ? (
-                                        <li><b>{question.total ?? 0}</b> {question.unit}</li>
-                                      ) : question.breakdown.length ? (
-                                        question.breakdown.map((row) => (
-                                          <li key={row.label}><b>{row.count}</b> {row.label}</li>
-                                        ))
-                                      ) : (
-                                        <li><b>{question.answered}</b> written note{question.answered === 1 ? '' : 's'}</li>
-                                      )}
-                                    </ul>
-                                  </div>
-                                ))}
+                            {mealOrders.length > 0 ? (
+                              <div className="pref-meal-orders">
+                                <span className="pref-meal-orders__label">Complete meal orders</span>
+                                <ul>
+                                  {mealOrders.map((order) => (
+                                    <li key={order.label}>
+                                      <b>{order.count}</b>
+                                      <span>{order.label}</span>
+                                    </li>
+                                  ))}
+                                </ul>
                               </div>
                             ) : (
-                              <p className="pref-service-card__empty">No preferences have been submitted for this table.</p>
+                              <p className="pref-service-card__empty">No meal selections have been submitted for this table.</p>
                             )}
 
-                            <details>
-                              <summary>
-                                <span>Seat-by-seat service list</span>
-                                <b>{table.guests.length}</b>
-                              </summary>
-                              <ol className="pref-seat-list">
-                                {table.guests.map((guest) => (
-                                  <li key={guest.id}>
-                                    <span className={`pref-seat-status${guest.checked_in ? ' is-arrived' : ''}`} aria-label={guest.checked_in ? 'Checked in' : 'Not arrived'} />
-                                    <div>
-                                      <strong>
-                                        {guest.seat_number ? `Seat ${guest.seat_number} · ` : ''}{guest.full_name}
-                                      </strong>
-                                      {guest.answers.length ? (
-                                        <ul className="pref-seat-preferences">
-                                          {guest.answers.map((answer) => (
-                                            <li key={answer.requirement_id}>
-                                              <span>{answer.label}</span>
-                                              <b>{answer.value}</b>
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      ) : <p>Preferences pending</p>}
-                                    </div>
-                                  </li>
-                                ))}
-                              </ol>
-                            </details>
+                            <button
+                              type="button"
+                              className="pref-service-card__open"
+                              onClick={() => setServiceTableIndex(index)}
+                            >
+                              <span>Open seat-by-seat service list</span>
+                              <b>{table.guests.length}</b>
+                            </button>
                           </article>
                         )
                       })}
@@ -924,7 +986,144 @@ export default function PreferencesPage() {
             </section>
           )}
 
-          <section className="pref-section pref-roster-section">
+          {dashboardView === 'tables' && data.seating.length === 0 && (
+            <section id="pref-view-tables" role="tabpanel" className="pref-view-empty">
+              <span aria-hidden="true">T</span>
+              <div><strong>No table service plan yet</strong><p>Seat guests at tables to organise their meal orders here.</p></div>
+            </section>
+          )}
+
+          {serviceTableIndex !== null && data.seating[serviceTableIndex] && (() => {
+            const table = data.seating[serviceTableIndex]
+            const mealOrders = getMealOrders(table)
+            const otherTotals = table.totals.filter((question) => !isMealQuestion(question))
+            return (
+              <div
+                className="pref-service-modal"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) setServiceTableIndex(null)
+                }}
+              >
+                <section
+                  id={`pref-service-modal-panel-${serviceTableIndex}`}
+                  className={`pref-service-modal__panel${table.unassigned ? ' is-unassigned' : ''}`}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="pref-service-modal-title"
+                >
+                  <header className="pref-service-modal__header">
+                    <div>
+                      <span>{table.section_name}</span>
+                      <h2 id="pref-service-modal-title">{table.table_label}</h2>
+                      <p>Complete meal orders and named service instructions</p>
+                    </div>
+                    <div className="pref-service-modal__actions">
+                      <button
+                        type="button"
+                        onClick={() => exportServicePackPdf(table, serviceTableIndex)}
+                        disabled={Boolean(exporting)}
+                      >
+                        {exporting === `table-pdf-${serviceTableIndex}` ? 'Saving…' : 'PDF'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportTablePng(table, serviceTableIndex)}
+                        disabled={Boolean(exporting)}
+                      >
+                        {exporting === `table-${serviceTableIndex}` ? 'Saving…' : 'PNG'}
+                      </button>
+                      <button
+                        type="button"
+                        className="pref-service-modal__close"
+                        onClick={() => setServiceTableIndex(null)}
+                        aria-label="Close table service details"
+                      >×</button>
+                    </div>
+                  </header>
+
+                  <div className="pref-service-stats pref-service-modal__stats">
+                    <span><b>{table.guest_count}</b>{table.seats ? ` / ${table.seats}` : ''}<small>guests</small></span>
+                    <span><b>{table.checked_in_count}</b><small>checked in</small></span>
+                    <span className={table.responded_count < table.guest_count ? 'is-pending' : ''}>
+                      <b>{table.responded_count}</b><small>responses</small>
+                    </span>
+                  </div>
+
+                  <div className="pref-service-modal__body">
+                    <section className="pref-service-modal__summary">
+                      <div>
+                        <p className="pref-service-modal__eyebrow">Kitchen order</p>
+                        <h3>Complete meals</h3>
+                      </div>
+                      {mealOrders.length ? (
+                        <ul className="pref-modal-meal-list">
+                          {mealOrders.map((order) => (
+                            <li key={order.label}><b>{order.count}</b><span>{order.label}</span></li>
+                          ))}
+                        </ul>
+                      ) : <p className="pref-service-card__empty">No meal selections submitted.</p>}
+
+                      {otherTotals.length > 0 && (
+                        <div className="pref-modal-other">
+                          <h3>Other table requirements</h3>
+                          <div className="pref-service-totals">
+                            {otherTotals.map((question) => (
+                              <div key={question.id}>
+                                <span>{question.label}</span>
+                                <ul>
+                                  {question.kind === 'quantity' ? (
+                                    <li><b>{question.total ?? 0}</b> {question.unit}</li>
+                                  ) : question.breakdown.length ? (
+                                    question.breakdown.map((row) => (
+                                      <li key={row.label}><b>{row.count}</b> {row.label}</li>
+                                    ))
+                                  ) : (
+                                    <li><b>{question.answered}</b> written note{question.answered === 1 ? '' : 's'}</li>
+                                  )}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="pref-service-modal__seats">
+                      <div className="pref-service-modal__seat-heading">
+                        <div>
+                          <p className="pref-service-modal__eyebrow">Serve by name</p>
+                          <h3>Seat-by-seat service list</h3>
+                        </div>
+                        <span>{table.guests.length} guest{table.guests.length === 1 ? '' : 's'}</span>
+                      </div>
+                      <ol className="pref-seat-list">
+                        {table.guests.map((guest) => (
+                          <li key={guest.id}>
+                            <span className={`pref-seat-status${guest.checked_in ? ' is-arrived' : ''}`} aria-label={guest.checked_in ? 'Checked in' : 'Not arrived'} />
+                            <div>
+                              <strong>{guest.seat_number ? `Seat ${guest.seat_number} · ` : ''}{guest.full_name}</strong>
+                              {guest.answers.length ? (
+                                <ul className="pref-seat-preferences">
+                                  {guest.answers.map((answer) => (
+                                    <li key={answer.requirement_id}>
+                                      <span>{answer.label}</span>
+                                      <b>{answer.value}</b>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : <p>Preferences pending</p>}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  </div>
+                </section>
+              </div>
+            )
+          })()}
+
+          {dashboardView === 'guests' && <section id="pref-view-guests" role="tabpanel" className="pref-section pref-roster-section">
             <div className="pref-roster-heading">
               <div>
                 <p>Guest-level detail</p>
@@ -998,7 +1197,7 @@ export default function PreferencesPage() {
                 </table>
               </div>
             )}
-          </section>
+          </section>}
         </>
       )}
 

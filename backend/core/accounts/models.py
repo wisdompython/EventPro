@@ -136,3 +136,115 @@ class Membership(models.Model):
 
     def __str__(self):
         return f'{self.user} · {self.organization} ({self.get_role_display()})'
+
+
+class OrganizationMessagingSettings(models.Model):
+    """Per-organization overrides for WhatsApp / RSVP delivery behaviour.
+
+    Every column is nullable and NULL means "inherit the platform default"
+    (the env-backed values in core.settings.base). Defaults are deliberately
+    *not* copied into the row on creation: an operator raising a platform
+    default must see it propagate to every tenant that has not opted out.
+
+    Never read these fields directly — go through
+    ``accounts.messaging_settings.messaging_settings_for()``, which applies
+    the platform defaults and the platform ceilings.
+    """
+
+    organization = models.OneToOneField(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name='messaging_settings',
+    )
+
+    # --- WhatsApp sending -------------------------------------------------
+    daily_send_limit = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Meta messaging tier: unique guests this workspace may open '
+                  'conversations with per rolling 24h. Blank inherits the platform default.',
+    )
+    whatsapp_messages_per_minute = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Pace for guest-pass sends. Applied as an in-task throttle '
+                  'within the worker rate-limit ceiling.',
+    )
+    rsvp_messages_per_minute = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Pace for RSVP invitation and reminder sends.',
+    )
+
+    # --- RSVP reminders ---------------------------------------------------
+    rsvp_max_reminders = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='How many times one guest who has not replied may be reminded.',
+    )
+    rsvp_reminder_cooldown_minutes = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Minimum wait between two reminders to the same guest.',
+    )
+
+    # --- Delivery retries -------------------------------------------------
+    failed_send_max_auto_retries = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Automatic retries for a send Meta accepted and later reported failed.',
+    )
+    failed_send_retry_delay_hours = models.JSONField(
+        null=True, blank=True,
+        help_text='Hours to wait before each automatic retry of a transient failure. '
+                  'The last entry repeats. Must be a non-empty list of positive integers.',
+    )
+    ecosystem_retry_delay_hours = models.JSONField(
+        null=True, blank=True,
+        help_text="Hours to wait before each retry of Meta's per-user marketing cap "
+                  '(error 131049). The last entry repeats.',
+    )
+
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        User,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='messaging_settings_updates',
+    )
+
+    class Meta:
+        verbose_name = 'organization messaging settings'
+        verbose_name_plural = 'organization messaging settings'
+
+    def __str__(self):
+        return f'Messaging settings · {self.organization}'
+
+
+class MessagingSettingsAuditLog(models.Model):
+    """Who changed which messaging value, from what to what, and when.
+
+    These values control spend and deliverability, so "who raised the daily
+    cap to 10000" has to be answerable. One row per field actually changed.
+    """
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name='messaging_settings_audit',
+    )
+    field = models.CharField(max_length=64)
+    # Rendered values, so the log stays readable after a field's type changes
+    # and can record "platform default" for a cleared override.
+    old_value = models.CharField(max_length=200, blank=True)
+    new_value = models.CharField(max_length=200, blank=True)
+    changed_by = models.ForeignKey(
+        User,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='messaging_settings_changes',
+    )
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-changed_at', '-id']
+        indexes = [
+            models.Index(fields=['organization', '-changed_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.organization} · {self.field}: {self.old_value} → {self.new_value}'

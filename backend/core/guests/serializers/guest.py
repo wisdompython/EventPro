@@ -6,6 +6,22 @@ from accounts.models import MembershipRole
 from accounts.tenancy import get_request_organization, has_membership_role
 
 
+def _phone_number_exists(event_id, phone_number, *, exclude_ids=()):
+    """Return whether a normalized phone number is already used in an event."""
+    from ..whatsapp import _normalise_phone
+
+    phone_key = _normalise_phone(str(phone_number or ''))
+    if not phone_key:
+        return False
+    candidates = Guest.objects.filter(event_id=event_id).exclude(phone_number='')
+    if exclude_ids:
+        candidates = candidates.exclude(pk__in=exclude_ids)
+    return any(
+        _normalise_phone(candidate) == phone_key
+        for candidate in candidates.values_list('phone_number', flat=True).iterator()
+    )
+
+
 def _can_see_phone(request) -> bool:
     """Only organization owners/admins and platform superusers may see phone numbers."""
     return bool(
@@ -183,6 +199,25 @@ class GuestSerializer(serializers.ModelSerializer):
             if event.organization_id != organization.id:
                 raise serializers.ValidationError({'event': 'Event not found.'})
 
+        # Phone numbers are unique within an event after normalization. This
+        # deliberately ignores guest names: two differently named guests with
+        # the same number are still duplicates.
+        if self.instance is None or 'phone_number' in data:
+            from ..whatsapp import _normalise_phone
+
+            phone_number = _normalise_phone(str(data.get('phone_number', '') or ''))
+            data['phone_number'] = phone_number
+            exclude_ids = [self.instance.pk] if self.instance else []
+            if _phone_number_exists(
+                event.id, phone_number, exclude_ids=exclude_ids,
+            ):
+                raise serializers.ValidationError({
+                    'phone_number': (
+                        'Duplicate number. This phone number already exists '
+                        'for this event.'
+                    ),
+                })
+
         required = _event_required_fields(event)
         seating_area = str(data.get('seating_area', '') or '').strip()
         table_number = str(data.get('table_number', '') or '').strip()
@@ -316,6 +351,15 @@ class GuestSerializer(serializers.ModelSerializer):
         plus_one_full_name = validated_data.pop('plus_one_full_name', '')
         plus_one_phone_number = validated_data.pop('plus_one_phone_number', '')
         event = validated_data.get('event')
+        if event:
+            event.__class__.objects.select_for_update().only('pk').get(pk=event.pk)
+            if _phone_number_exists(event.id, validated_data.get('phone_number', '')):
+                raise serializers.ValidationError({
+                    'phone_number': (
+                        'Duplicate number. This phone number already exists '
+                        'for this event.'
+                    ),
+                })
         if event and 'scheduled_send_at' not in validated_data and event.pass_send_at:
             validated_data['scheduled_send_at'] = event.pass_send_at
         guest = super().create(validated_data)
@@ -349,6 +393,21 @@ class GuestSerializer(serializers.ModelSerializer):
         seating_area = validated_data.pop('seating_area', '')
         plus_one_full_name = validated_data.pop('plus_one_full_name', '')
         plus_one_phone_number = validated_data.pop('plus_one_phone_number', '')
+        target_event = validated_data.get('event', instance.event)
+        target_event.__class__.objects.select_for_update().only('pk').get(
+            pk=target_event.pk,
+        )
+        if 'phone_number' in validated_data and _phone_number_exists(
+            target_event.id,
+            validated_data['phone_number'],
+            exclude_ids=[instance.pk],
+        ):
+            raise serializers.ValidationError({
+                'phone_number': (
+                    'Duplicate number. This phone number already exists '
+                    'for this event.'
+                ),
+            })
         guest = super().update(instance, validated_data)
         from ..domains.seating import (
             SeatingCapacityError, assign_guest_to_section, assign_guest_to_table,
@@ -388,6 +447,9 @@ class GuestListSerializer(serializers.ModelSerializer):
     named_plus_one_name = serializers.SerializerMethodField()
     is_plus_one = serializers.SerializerMethodField()
     primary_guest_name = serializers.SerializerMethodField()
+    rsvp_response_status = serializers.CharField(read_only=True, allow_null=True)
+    rsvp_invitation_status = serializers.CharField(read_only=True, allow_null=True)
+    rsvp_pass_status = serializers.CharField(read_only=True, allow_null=True)
 
     class Meta:
         model = Guest
@@ -397,6 +459,7 @@ class GuestListSerializer(serializers.ModelSerializer):
             'aso_ebi_requested', 'aso_ebi_quantity', 'plus_one_attending',
             'has_named_plus_one', 'plus_one_guest_id',
             'named_plus_one_name', 'is_plus_one', 'primary_guest_name',
+            'rsvp_response_status', 'rsvp_invitation_status', 'rsvp_pass_status',
             'celebrant_name', 'preferences_submitted_at',
             'status', 'checked_in_at', 'plus_one_checked_in', 'plus_one_checked_in_at',
             'whatsapp_sent', 'scheduled_send_at', 'registered_at',

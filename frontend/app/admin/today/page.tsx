@@ -117,7 +117,7 @@ export default function DashboardPage() {
         severity: 'critical',
       })
     }
-    if (stats?.wa_unsent) {
+    if (!activeEvent.rsvp_workflow_id && stats?.wa_unsent) {
       list.push({
         key: 'wa_unsent',
         count: stats.wa_unsent,

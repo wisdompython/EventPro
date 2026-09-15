@@ -379,6 +379,44 @@ class RsvpWorkflowApiTests(TestCase):
         self.assertEqual(response.data['passes_sent'], 1)
         self.assertEqual(response.data['confirmation_rate'], 100.0)
 
+    def test_awaiting_count_only_includes_received_invitations_without_reply(self):
+        workflow = self.create_workflow()
+        guests = [
+            Guest.objects.create(
+                event=self.event,
+                full_name=f'Counter Guest {index}',
+                phone_number=f'23480000001{index:02d}',
+            )
+            for index in range(4)
+        ]
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=guests[0],
+            invitation_status=RsvpRecipient.InvitationStatus.DELIVERED,
+        )
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=guests[1],
+            invitation_status=RsvpRecipient.InvitationStatus.FAILED,
+        )
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=guests[2],
+            invitation_status=RsvpRecipient.InvitationStatus.NOT_SENT,
+        )
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=guests[3],
+            response_status=RsvpRecipient.ResponseStatus.DECLINED,
+            invitation_status=RsvpRecipient.InvitationStatus.READ,
+        )
+
+        response = self.client.get(f'/api/rsvp/workflows/{workflow.id}/stats/')
+
+        self.assertEqual(response.data['awaiting'], 1)
+        self.assertEqual(response.data['declined'], 1)
+        self.assertEqual(response.data['invitation_failed'], 1)
+
     def test_stats_add_plus_ones_to_confirmed_guest_estimate(self):
         self.event.allow_plus_one = True
         self.event.save(update_fields=['allow_plus_one'])
@@ -524,8 +562,8 @@ class RsvpWorkflowApiTests(TestCase):
         eligible_guest = Guest.objects.create(event=self.event, full_name='Eligible', phone_number='2348000000002')
         recent_guest = Guest.objects.create(event=self.event, full_name='Recent', phone_number='2348000000003')
         capped_guest = Guest.objects.create(event=self.event, full_name='Capped', phone_number='2348000000004')
-        eligible = RsvpRecipient.objects.create(workflow=workflow, guest=eligible_guest, invitation_status=RsvpRecipient.InvitationStatus.SENT, invitation_sent_at=old)
-        recent_recipient = RsvpRecipient.objects.create(workflow=workflow, guest=recent_guest, invitation_status=RsvpRecipient.InvitationStatus.SENT, invitation_sent_at=recent)
+        eligible = RsvpRecipient.objects.create(workflow=workflow, guest=eligible_guest, invitation_status=RsvpRecipient.InvitationStatus.DELIVERED, invitation_sent_at=old)
+        recent_recipient = RsvpRecipient.objects.create(workflow=workflow, guest=recent_guest, invitation_status=RsvpRecipient.InvitationStatus.READ, invitation_sent_at=recent)
         capped = RsvpRecipient.objects.create(workflow=workflow, guest=capped_guest, invitation_status=RsvpRecipient.InvitationStatus.READ, invitation_sent_at=old, reminder_count=2)
 
         response = self.client.post(f'/api/rsvp/workflows/{workflow.id}/remind-awaiting/')
@@ -536,7 +574,7 @@ class RsvpWorkflowApiTests(TestCase):
         recent_recipient.refresh_from_db()
         capped.refresh_from_db()
         self.assertEqual(eligible.invitation_status, RsvpRecipient.InvitationStatus.QUEUED)
-        self.assertEqual(recent_recipient.invitation_status, RsvpRecipient.InvitationStatus.SENT)
+        self.assertEqual(recent_recipient.invitation_status, RsvpRecipient.InvitationStatus.READ)
         self.assertEqual(capped.invitation_status, RsvpRecipient.InvitationStatus.READ)
         mock_queue.assert_called_once_with(workflow.id)
 
@@ -545,7 +583,7 @@ class RsvpWorkflowApiTests(TestCase):
         mock_queue.assert_called_once_with(workflow.id)
 
     @patch('rsvp.tasks.queue_workflow_invitations.delay')
-    def test_remind_awaiting_retries_failed_replacement_guest(self, mock_queue):
+    def test_remind_awaiting_does_not_retry_failed_delivery(self, mock_queue):
         workflow = self.create_workflow()
         workflow.status = RsvpWorkflow.Status.ACTIVE
         workflow.save(update_fields=['status'])
@@ -559,14 +597,14 @@ class RsvpWorkflowApiTests(TestCase):
         response = self.client.post(f'/api/rsvp/workflows/{workflow.id}/remind-awaiting/')
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data['queued'], 1)
+        self.assertEqual(response.data['queued'], 0)
         recipient.refresh_from_db()
-        self.assertEqual(recipient.invitation_status, RsvpRecipient.InvitationStatus.QUEUED)
-        self.assertEqual(recipient.last_error, '')
-        mock_queue.assert_called_once_with(workflow.id)
+        self.assertEqual(recipient.invitation_status, RsvpRecipient.InvitationStatus.FAILED)
+        self.assertEqual(recipient.last_error, 'Invalid destination number')
+        mock_queue.assert_not_called()
 
     @patch('rsvp.tasks.queue_workflow_invitations.delay')
-    def test_remind_awaiting_respects_failed_retry_cooldown(self, mock_queue):
+    def test_remind_awaiting_keeps_cooling_failure_separate(self, mock_queue):
         workflow = self.create_workflow()
         workflow.status = RsvpWorkflow.Status.ACTIVE
         workflow.save(update_fields=['status'])
@@ -583,14 +621,14 @@ class RsvpWorkflowApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['queued'], 0)
-        self.assertEqual(response.data['skipped_cooldown'], 1)
+        self.assertEqual(response.data['skipped_cooldown'], 0)
         cooling.refresh_from_db()
         self.assertEqual(cooling.invitation_status, RsvpRecipient.InvitationStatus.FAILED)
         self.assertEqual(cooling.invitation_error, '(131049) Meta chose not to deliver')
         mock_queue.assert_not_called()
 
     @patch('rsvp.tasks.queue_workflow_invitations.delay')
-    def test_remind_awaiting_ignores_cooldown_after_template_change(self, mock_queue):
+    def test_remind_awaiting_does_not_retry_failure_after_template_change(self, mock_queue):
         workflow = self.create_workflow()
         workflow.status = RsvpWorkflow.Status.ACTIVE
         workflow.save(update_fields=['status'])
@@ -606,11 +644,31 @@ class RsvpWorkflowApiTests(TestCase):
         response = self.client.post(f'/api/rsvp/workflows/{workflow.id}/remind-awaiting/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['queued'], 1)
+        self.assertEqual(response.data['queued'], 0)
         self.assertEqual(response.data['skipped_cooldown'], 0)
         recipient.refresh_from_db()
-        self.assertEqual(recipient.invitation_status, RsvpRecipient.InvitationStatus.QUEUED)
-        self.assertEqual(recipient.invitation_error, '')
+        self.assertEqual(recipient.invitation_status, RsvpRecipient.InvitationStatus.FAILED)
+        self.assertEqual(recipient.invitation_error, '(131049) Meta chose not to deliver')
+        mock_queue.assert_not_called()
+
+    @patch('rsvp.tasks.queue_workflow_invitations.delay')
+    def test_resume_keeps_failed_deliveries_in_failure_flow(self, mock_queue):
+        workflow = self.create_workflow()
+        workflow.status = RsvpWorkflow.Status.PAUSED
+        workflow.save(update_fields=['status'])
+        failed = RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=self.guest_a,
+            invitation_status=RsvpRecipient.InvitationStatus.FAILED,
+            invitation_error='Invalid destination number',
+        )
+
+        response = self.client.post(f'/api/rsvp/workflows/{workflow.id}/resume/')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        failed.refresh_from_db()
+        self.assertEqual(failed.invitation_status, RsvpRecipient.InvitationStatus.FAILED)
+        self.assertEqual(failed.invitation_error, 'Invalid destination number')
         mock_queue.assert_called_once_with(workflow.id)
 
 
@@ -1665,12 +1723,19 @@ class RsvpAutoRetryTests(TestCase):
 
     @patch('rsvp.tasks.send_confirmed_pass')
     def test_auto_retry_stops_after_max_attempts(self, mock_pass):
-        from .tasks import FAILED_SEND_MAX_AUTO_RETRIES, dispatch_scheduled_rsvp_messages
+        from accounts.messaging_settings import messaging_settings_for
 
+        from .tasks import dispatch_scheduled_rsvp_messages
+
+        # The retry cap is now per organization, resolved from the workflow's
+        # owning event rather than a module constant.
+        max_retries = messaging_settings_for(
+            self.event.organization_id,
+        ).failed_send_max_auto_retries
         self._fail_pass(
             error=self.ECOSYSTEM_ERROR,
             queued_ago_hours=48,
-            retries=FAILED_SEND_MAX_AUTO_RETRIES,
+            retries=max_retries,
         )
 
         result = dispatch_scheduled_rsvp_messages()
@@ -1984,6 +2049,71 @@ class RsvpRecipientSegmentTests(TestCase):
         self.assertEqual(stats['confirmed_no_pass'], 1)
         self.assertEqual(stats['passes_sent'], 1)
         self.assertEqual(stats['delivery_failed'], 2)
+
+    def test_recipient_ordering_by_sent_and_confirmed_dates(self):
+        now = timezone.now()
+        RsvpRecipient.objects.filter(pk=self.awaiting_delivered.pk).update(
+            invitation_sent_at=now - timezone.timedelta(days=3),
+        )
+        RsvpRecipient.objects.filter(pk=self.confirmed_with_pass.pk).update(
+            invitation_sent_at=now - timezone.timedelta(days=4),
+            responded_at=now - timezone.timedelta(days=2),
+        )
+        RsvpRecipient.objects.filter(pk=self.confirmed_no_pass.pk).update(
+            invitation_sent_at=now - timezone.timedelta(days=2),
+            responded_at=now - timezone.timedelta(days=1),
+        )
+
+        sent = self.client.get('/api/rsvp/recipients/', {
+            'workflow': self.workflow.id,
+            'ordering': '-sent',
+        })
+        confirmed = self.client.get('/api/rsvp/recipients/', {
+            'workflow': self.workflow.id,
+            'ordering': '-confirmed',
+        })
+
+        self.assertEqual(sent.status_code, 200, sent.data)
+        self.assertEqual(
+            [row['guest_name'] for row in sent.data['results'][:3]],
+            ['No Pass Yet', 'Invite Read', 'Has Pass'],
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.data)
+        self.assertEqual(
+            [row['guest_name'] for row in confirmed.data['results'][:2]],
+            ['No Pass Yet', 'Has Pass'],
+        )
+
+    def test_recipient_ordering_and_serialization_use_last_message_date(self):
+        now = timezone.now()
+        RsvpRecipient.objects.filter(pk=self.awaiting_delivered.pk).update(
+            invitation_sent_at=now - timezone.timedelta(days=3),
+        )
+        RsvpRecipient.objects.filter(pk=self.confirmed_with_pass.pk).update(
+            invitation_sent_at=now - timezone.timedelta(days=4),
+        )
+        Guest.objects.filter(pk=self.confirmed_with_pass.guest_id).update(
+            whatsapp_sent_at=now - timezone.timedelta(days=1),
+        )
+        RsvpRecipient.objects.filter(pk=self.confirmed_no_pass.pk).update(
+            invitation_sent_at=now - timezone.timedelta(days=2),
+            last_reminded_at=now,
+        )
+
+        response = self.client.get('/api/rsvp/recipients/', {
+            'workflow': self.workflow.id,
+            'ordering': '-last_message',
+        })
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            [row['guest_name'] for row in response.data['results'][:3]],
+            ['No Pass Yet', 'Has Pass', 'Invite Read'],
+        )
+        self.assertEqual(
+            response.data['results'][0]['last_message_sent_at'],
+            now.isoformat(),
+        )
 
 
 class RsvpChannelErrorTests(TestCase):

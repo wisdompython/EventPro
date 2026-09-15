@@ -265,6 +265,9 @@
 /* A full table should be obvious without reading the count. */
 .seating-table.is-full .seating-table__surface { border-color: #2f7d5c; background: #eef7f1; }
 .seating-table.is-full.is-selected .seating-table__surface { border-color: #6757d9; }
+.seating-table.is-drop-target { z-index: 8; opacity: 1 !important; filter: none !important; }
+.seating-table.is-drop-target .seating-table__surface { border-color: #e4573d; background: #fff4ef; box-shadow: 0 0 0 7px rgba(228,87,61,.18), 0 14px 30px rgba(89,46,31,.22); transform: scale(1.08); }
+.seating-table.is-drop-blocked .seating-table__surface { border-color: #c92828; background: #fff0f0; box-shadow: 0 0 0 6px rgba(201,40,40,.13); }
 
 .seating-table__seats { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .seating-table__seats > i {
@@ -299,6 +302,8 @@
 
 .seating-actions-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
 .seating-actions-row button { flex: 1; min-width: 72px; }
+.seating-history-actions { display: flex; gap: 6px; }
+.seating-history-actions .admin-secondary-action:disabled { cursor: not-allowed; opacity: .42; }
 
 /* ── Stats strip ─────────────────────────────────────────────────────────── */
 .seating-stats {
@@ -407,6 +412,40 @@
 .seating-link-danger { color: #c92828; font-size: 0.68rem; font-weight: 750; }
 .seating-link-danger:hover { text-decoration: underline; }
 
+/* ── Persistent guest assignment tray ───────────────────────────────────── */
+.seating-panel--guest-tray { border-radius: 16px 5px 16px 5px; border-left: 3px solid #6757d9; padding: 14px; }
+.seating-panel--guest-tray .seating-panel__head { align-items: flex-start; }
+.seating-panel--guest-tray .seating-panel__head > div p { margin-top: 3px; color: #8b8493; font-size: .59rem; }
+.seating-panel--guest-tray .seating-panel__head > strong { color: #4f42b9; font-size: .78rem; font-weight: 840; white-space: nowrap; }
+.seating-panel--guest-tray .seating-panel__head > strong span { color: #8b8493; font-size: .51rem; font-weight: 680; }
+.seating-guest-search { display: flex; min-height: 38px; align-items: center; gap: 8px; margin-top: 12px; border: 1px solid var(--admin-line); border-radius: 10px 3px 10px 3px; background: #f8f5ee; padding: 0 9px; color: #8b8493; }
+.seating-guest-search:focus-within { border-color: rgba(103,87,217,.55); box-shadow: 0 0 0 3px rgba(103,87,217,.1); }
+.seating-guest-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #10231d; font-size: .69rem; }
+.seating-guest-search input::placeholder { color: #aaa3ad; }
+.seating-guest-filters { display: flex; gap: 3px; margin-top: 7px; border-radius: 9px 3px 9px 3px; background: #eeebf1; padding: 3px; }
+.seating-guest-filters button { min-height: 28px; flex: 1; border-radius: 7px 2px 7px 2px; color: #77707f; font-size: .55rem; font-weight: 740; }
+.seating-guest-filters button.is-active { background: #6757d9; color: white; box-shadow: 0 4px 10px rgba(76,60,187,.2); }
+.seating-guest-ticket-filter { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; margin-top: 7px; }
+.seating-guest-ticket-filter > span { color: #817987; font-size: .53rem; font-weight: 780; letter-spacing: .07em; text-transform: uppercase; }
+.seating-guest-ticket-filter select { min-width: 0; min-height: 31px; border: 1px solid var(--admin-line); border-radius: 8px 2px 8px 2px; background: #fff; padding: 0 7px; color: #413a48; font-size: .59rem; }
+.seating-guest-tray-list { display: grid; max-height: 285px; gap: 4px; overflow-y: auto; margin-top: 9px; padding-right: 2px; }
+.seating-guest-tray-list li { display: grid; min-height: 47px; cursor: grab; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 1px solid rgba(35,29,55,.1); border-radius: 10px 3px 10px 3px; background: #fff; padding: 6px 7px; transition: border-color 130ms ease, box-shadow 130ms ease, opacity 130ms ease; }
+.seating-guest-tray-list li:hover { border-color: rgba(103,87,217,.34); box-shadow: 0 5px 13px rgba(35,29,55,.07); }
+.seating-guest-tray-list li:active { cursor: grabbing; }
+.seating-guest-tray-list li.is-dragging, .seating-guest-list li.is-dragging { opacity: .4; }
+.seating-guest-status { width: 7px; height: 7px; border-radius: 50%; background: #c4bec8; }
+.seating-guest-status.is-arrived { background: #178b63; box-shadow: 0 0 0 3px rgba(23,139,99,.12); }
+.seating-guest-tray-list__identity { min-width: 0; }
+.seating-guest-tray-list__identity b { display: block; overflow: hidden; color: #2c2634; font-size: .63rem; font-weight: 770; text-overflow: ellipsis; white-space: nowrap; }
+.seating-guest-tray-list__identity small { display: block; overflow: hidden; margin-top: 2px; color: #958e9b; font-size: .51rem; text-overflow: ellipsis; white-space: nowrap; }
+.seating-guest-tray-list li > button { max-width: 72px; min-height: 25px; overflow: hidden; border-radius: 7px 2px 7px 2px; background: rgba(103,87,217,.09); padding: 0 7px; color: #5b4fc0; font-size: .52rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.seating-guest-tray-list li > button:hover { background: rgba(103,87,217,.16); }
+.seating-guest-tray-list li > button.is-seat-action { width: 25px; padding: 0; background: rgba(47,125,92,.13); color: #2f7d5c; font-size: .8rem; }
+.seating-guest-tray-list li > button:disabled { cursor: not-allowed; opacity: .35; }
+.seating-guest-tray-list li > i { color: #aaa3af; font-size: .72rem; font-style: normal; letter-spacing: -2px; }
+.seating-guest-tray__empty { padding: 18px 5px 8px; text-align: center; }
+.seating-guest-tray__more { margin-top: 7px; color: #918a98; font-size: .52rem; line-height: 1.4; }
+
 /* ── Guest lists ─────────────────────────────────────────────────────────── */
 .seating-guests { margin-top: 6px; border-top: 1px solid var(--admin-line); padding-top: 4px; }
 .seating-guest-list { display: grid; gap: 4px; max-height: 190px; overflow-y: auto; }
@@ -461,6 +500,7 @@
   background: rgba(255, 255, 255, 0.76);
   box-shadow: 0 12px 30px rgba(53, 42, 111, 0.065);
 }
+.seating-guest-list li[draggable="true"] { cursor: grab; }
 .seating-picker-overview > div { min-width: 100px; padding: 15px 17px; }
 .seating-picker-overview > div + div { border-left: 1px solid rgba(35, 29, 55, 0.08); }
 .seating-picker-overview strong { display: block; color: #211d2b; font-family: var(--font-display); font-size: 1.28rem; font-weight: 800; letter-spacing: -0.04em; }

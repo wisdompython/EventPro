@@ -142,6 +142,8 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
     fd.append('name', (form.elements.namedItem('name') as HTMLInputElement).value)
     fd.append('date', watDateTimeInputToIso((form.elements.namedItem('date') as HTMLInputElement).value))
     fd.append('venue', (form.elements.namedItem('venue') as HTMLInputElement).value)
+    const locationsSetup = (form.elements.namedItem('locations_setup') as HTMLInputElement | null)?.value ?? ''
+    if (locationsSetup) fd.append('locations_setup', locationsSetup)
     fd.append('description', (form.elements.namedItem('description') as HTMLTextAreaElement).value)
     fd.append('rsvp_message', (form.elements.namedItem('rsvp_message') as HTMLTextAreaElement).value)
     fd.append('color_of_day', (form.elements.namedItem('color_of_day') as HTMLInputElement).value)

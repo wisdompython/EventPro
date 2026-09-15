@@ -206,6 +206,20 @@ class RsvpRecipient(models.Model):
         return f'{self.guest.full_name} — {self.get_response_status_display()}'
 
 
+# "Awaiting a reply" means Meta confirmed the invitation reached the guest,
+# not merely that Event Pro submitted it to Meta. Failed, queued and not-sent
+# invitations are tracked separately and must never enter reminder batches.
+INVITATION_RECEIVED_STATUSES = (
+    RsvpRecipient.InvitationStatus.DELIVERED,
+    RsvpRecipient.InvitationStatus.READ,
+)
+PASS_SENT_STATUSES = (
+    RsvpRecipient.PassStatus.SENT,
+    RsvpRecipient.PassStatus.DELIVERED,
+    RsvpRecipient.PassStatus.READ,
+)
+
+
 def assign_unique_public_codes(recipients):
     """Remove code collisions inside a bulk insert and against saved rows."""
     recipients = list(recipients)

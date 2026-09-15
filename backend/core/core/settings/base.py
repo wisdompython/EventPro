@@ -126,5 +126,47 @@ REST_FRAMEWORK = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Messaging platform defaults
+#
+# These are the *platform* defaults for values an organization can override on
+# Admin -> Messaging settings (accounts.OrganizationMessagingSettings). An org
+# row stores NULL for "inherit the platform default", so raising a default here
+# still propagates to every tenant that has not set its own value.
+#
+# Read them through accounts.messaging_settings.messaging_settings_for(org_id),
+# never through settings.X directly, or the per-org override is bypassed.
+# ---------------------------------------------------------------------------
 RSVP_REMINDER_COOLDOWN_MINUTES = int(os.environ.get('RSVP_REMINDER_COOLDOWN_MINUTES', '360'))
 RSVP_MAX_REMINDERS = int(os.environ.get('RSVP_MAX_REMINDERS', '3'))
+
+# Automatic retries for sends Meta accepted and later reported as failed.
+FAILED_SEND_MAX_AUTO_RETRIES = int(os.environ.get('FAILED_SEND_MAX_AUTO_RETRIES', '3'))
+# Backoff (hours) between automatic retries, indexed by attempt count. The
+# last entry repeats for any further attempt.
+FAILED_SEND_RETRY_DELAY_HOURS = [1, 4, 12]
+# Meta's per-user marketing cap (error 131049) clears on a daily-ish window,
+# so those retries are spaced a day apart regardless of attempt number.
+ECOSYSTEM_RETRY_DELAY_HOURS = [24, 24, 24]
+
+# Per-organization sending pace, applied as an in-task spacing throttle on top
+# of the worker-level Celery rate limit (see WHATSAPP_WORKER_RATE_LIMIT_PER_MINUTE).
+WHATSAPP_MESSAGES_PER_MINUTE = int(os.environ.get('WHATSAPP_MESSAGES_PER_MINUTE', '20'))
+RSVP_MESSAGES_PER_MINUTE = int(os.environ.get('RSVP_MESSAGES_PER_MINUTE', '20'))
+
+# ---------------------------------------------------------------------------
+# Platform ceilings — a tenant may not configure a value beyond these. Only a
+# platform superuser can raise them, and only by changing the environment.
+# ---------------------------------------------------------------------------
+# Hard ceiling on the per-org daily send limit. Meta's top published tier is
+# 100K unique users per rolling 24h; nothing above that is a real tier.
+WHATSAPP_DAILY_SEND_LIMIT_CEILING = int(os.environ.get('WHATSAPP_DAILY_SEND_LIMIT_CEILING', '100000'))
+# Repeated unanswered messages get business numbers blocked, so the reminder
+# cap and cooldown floor are platform policy, not tenant preference.
+RSVP_MAX_REMINDERS_CEILING = int(os.environ.get('RSVP_MAX_REMINDERS_CEILING', '5'))
+RSVP_REMINDER_COOLDOWN_FLOOR_MINUTES = int(os.environ.get('RSVP_REMINDER_COOLDOWN_FLOOR_MINUTES', '60'))
+FAILED_SEND_MAX_AUTO_RETRIES_CEILING = int(os.environ.get('FAILED_SEND_MAX_AUTO_RETRIES_CEILING', '10'))
+# Celery applies task rate_limit per worker process, and the decorator argument
+# is bound at import time. This is therefore a global, restart-only ceiling;
+# the per-org messages-per-minute value throttles within it.
+WHATSAPP_WORKER_RATE_LIMIT_PER_MINUTE = int(os.environ.get('WHATSAPP_WORKER_RATE_LIMIT_PER_MINUTE', '20'))

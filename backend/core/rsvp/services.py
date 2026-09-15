@@ -245,6 +245,84 @@ def confirmed_reminder_guest_ids(event_id):
     )
 
 
+def guest_rsvp_summary(event_id, guest_ids=None):
+    """Return guest-list counters using the workflow's RSVP definitions."""
+    from django.db.models import Count, Q
+
+    from .models import INVITATION_RECEIVED_STATUSES
+
+    workflow_id = (
+        RsvpWorkflow.objects
+        .filter(event_id=event_id)
+        .values_list('id', flat=True)
+        .first()
+    )
+    if workflow_id is None:
+        return None
+    recipients = RsvpRecipient.objects.filter(workflow_id=workflow_id)
+    if guest_ids is not None:
+        recipients = recipients.filter(guest_id__in=guest_ids)
+    counts = recipients.aggregate(
+        confirmed=Count(
+            'id',
+            filter=Q(response_status=RsvpRecipient.ResponseStatus.CONFIRMED),
+        ),
+        declined=Count(
+            'id',
+            filter=Q(response_status=RsvpRecipient.ResponseStatus.DECLINED),
+        ),
+        awaiting=Count(
+            'id',
+            filter=Q(
+                response_status=RsvpRecipient.ResponseStatus.AWAITING,
+                invitation_status__in=INVITATION_RECEIVED_STATUSES,
+            ),
+        ),
+        delivery_failed=Count(
+            'id',
+            filter=(
+                Q(invitation_status=RsvpRecipient.InvitationStatus.FAILED)
+                | Q(pass_status=RsvpRecipient.PassStatus.FAILED)
+            ),
+            distinct=True,
+        ),
+        pending=Count(
+            'id',
+            filter=Q(
+                response_status=RsvpRecipient.ResponseStatus.CONFIRMED,
+                guest__status='registered',
+            ),
+        ),
+    )
+    return {'has_rsvp': True, **counts}
+
+
+def guest_ids_for_rsvp_state(event_id, state):
+    """Return IDs represented by an RSVP counter on the guest list."""
+    from django.db.models import Q
+
+    from .models import INVITATION_RECEIVED_STATUSES
+
+    recipients = RsvpRecipient.objects.filter(workflow__event_id=event_id)
+    if state == RsvpRecipient.ResponseStatus.CONFIRMED:
+        recipients = recipients.filter(response_status=state)
+    elif state == RsvpRecipient.ResponseStatus.DECLINED:
+        recipients = recipients.filter(response_status=state)
+    elif state == RsvpRecipient.ResponseStatus.AWAITING:
+        recipients = recipients.filter(
+            response_status=state,
+            invitation_status__in=INVITATION_RECEIVED_STATUSES,
+        )
+    elif state == 'delivery_failed':
+        recipients = recipients.filter(
+            Q(invitation_status=RsvpRecipient.InvitationStatus.FAILED)
+            | Q(pass_status=RsvpRecipient.PassStatus.FAILED)
+        )
+    else:
+        return RsvpRecipient.objects.none().values_list('guest_id', flat=True)
+    return recipients.values_list('guest_id', flat=True)
+
+
 def extract_button_payload(message: dict):
     message_type = message.get('type')
     if message_type == 'button':

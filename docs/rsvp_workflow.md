@@ -62,12 +62,39 @@ Automatic delivery requires an event guest-pass design and an approved WhatsApp 
 
 Choose **Send passes directly** during event creation to keep the original workflow. Select **Send immediately** or set one default scheduled delivery date and time for the event; every newly added or imported guest inherits it. A per-guest delivery time can still override the event default.
 
+## Reminding guests who have not responded
+
+**Remind awaiting guests** re-queues every guest who received an invitation and
+has not replied. Two settings decide who is eligible:
+
+- **How many reminders one guest can get.** How many times a guest who hasn't
+  replied can be reminded. Guests who receive repeated unanswered messages may
+  block your number, which affects delivery for all your events.
+- **Quiet time between reminders.** The shortest gap between two reminders to
+  the same guest. Short gaps feel like spam and are the fastest way to get a
+  business number reported.
+
+Both are set per workspace on **Admin → Messaging settings**, alongside the
+daily send limit and the automatic-retry behaviour. Changes take effect on the
+next send; no restart or environment edit is needed.
+
+The environment variables `RSVP_MAX_REMINDERS` and
+`RSVP_REMINDER_COOLDOWN_MINUTES` still set the *platform default* used by any
+workspace that has not chosen its own value. A workspace that has overridden a
+value ignores the environment; the settings page shows which is in force.
+
 ## Daily send budget (Meta messaging tier)
 
 Meta limits how many unique guests a WhatsApp Business number can open
 business-initiated conversations with per rolling 24 hours (250 unverified,
-then 1K → 10K → 100K as the tier grows). Set `WHATSAPP_DAILY_SEND_LIMIT` to
-the account's current tier (default 2000).
+then 1K → 10K → 100K as the tier grows).
+
+The limit is **per workspace** — each customer organization has its own
+WhatsApp Business account and therefore its own tier, and one workspace's
+sends never consume another's budget. Set it on **Admin → Messaging
+settings** ("Guests you can message per day") to the tier shown in that
+account's WhatsApp Manager. `WHATSAPP_DAILY_SEND_LIMIT` (default 2000) remains
+the platform default for workspaces that have not set their own.
 
 Every dispatch path — RSVP invitations, reminders to awaiting guests,
 scheduled and bulk pass sends, and event reminders — checks the trailing
@@ -90,12 +117,16 @@ window), though the budget counts them conservatively.
 Practical notes for large events:
 
 - Sending 50%+ of the tier in a week with a medium/high quality rating
-  usually triggers Meta's automatic tier upgrade within 24 hours; raise
-  `WHATSAPP_DAILY_SEND_LIMIT` after the upgrade is visible in the WhatsApp
-  Manager.
-- The Celery task rate limit (20 messages/minute) is applied per worker
-  process; do not scale the `messages` queue to multiple workers without
-  accounting for the multiplied throughput.
+  usually triggers Meta's automatic tier upgrade within 24 hours; raise the
+  workspace's daily limit on the settings page after the upgrade is visible in
+  the WhatsApp Manager.
+- Sending speed has two layers. The Celery task rate limit
+  (`WHATSAPP_WORKER_RATE_LIMIT_PER_MINUTE`, default 20/minute) is a ceiling
+  bound when the worker imports the task module: it is global, and changing it
+  requires a worker restart. Do not scale the `messages` queue to multiple
+  workers without accounting for the multiplied throughput. Within that
+  ceiling, each workspace's "sending speed" setting spaces its own sends and
+  takes effect immediately.
 - A dispatched message that never completes (lost worker, exhausted
   retries) is re-dispatched automatically by the Beat sweep after 6 hours.
 
@@ -128,7 +159,8 @@ numbers, and never exposes task arguments or raw payloads.
 
 - Transient WhatsApp restrictions are retried automatically. Meta sometimes
   accepts a send and later reports a failure through the status webhook.
-  The five-minute dispatcher re-queues those recipients up to three times,
+  The five-minute dispatcher re-queues those recipients up to the workspace's
+  configured retry count (Admin → Messaging settings, default three times),
   and the wait matches the error: "This message was not delivered to
   maintain healthy ecosystem engagement" (Meta's per-user marketing cap,
   error 131049) is retried once per 24 hours, per Meta's guidance; quick-

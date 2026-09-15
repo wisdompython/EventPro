@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.db.models import Count, Q, Sum
 from rest_framework import serializers
-from ..models import Event, Font, GuestRequirement
+from ..models import Event, EventLocation, Font, GuestRequirement
 from accounts.tenancy import get_request_organization
 from ..domains.seating import create_initial_seating_setup
 
@@ -13,6 +13,15 @@ CONFIGURABLE_FIELDS = ['full_name', 'phone_number', 'email', 'table_number', 'se
 
 # Absolute minimum — full_name is always required regardless of event config
 ALWAYS_REQUIRED = {'full_name'}
+
+
+class EventLocationSerializer(serializers.ModelSerializer):
+    """One stop in an event's schedule, as sent to and from the client."""
+
+    class Meta:
+        model = EventLocation
+        fields = ('id', 'name', 'venue', 'starts_at', 'sort_order')
+        read_only_fields = ('id',)
 
 
 def _event_required_fields(event: Event) -> set:
@@ -65,6 +74,10 @@ class EventSerializer(serializers.ModelSerializer):
     name_font_name = serializers.CharField(source='name_font.name', read_only=True)
     whatsapp_template_name = serializers.CharField(source='whatsapp_template.display_name', read_only=True)
     create_rsvp_workflow = serializers.BooleanField(write_only=True, required=False, default=False)
+    locations = EventLocationSerializer(many=True, read_only=True)
+    # Write side is a plain JSON list so the form can send the whole schedule
+    # in one field alongside its multipart upload, matching seating_setup.
+    locations_setup = serializers.JSONField(write_only=True, required=False, default=None)
     seating_setup = serializers.JSONField(write_only=True, required=False, default=list)
     requirements_setup = serializers.JSONField(write_only=True, required=False, default=list)
     rsvp_workflow_id = serializers.SerializerMethodField()
@@ -202,6 +215,7 @@ class EventSerializer(serializers.ModelSerializer):
         model = Event
         fields = (
             'id', 'name', 'date', 'venue', 'description', 'rsvp_message', 'color_of_day',
+            'locations', 'locations_setup',
             'rsvp_primary_color', 'rsvp_background_color', 'rsvp_card_color',
             'rsvp_text_color', 'rsvp_background_image',
             'design_template',
@@ -320,9 +334,72 @@ class EventSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Upload a PNG, JPEG, or WebP background image.')
         return value
 
+    def validate_locations_setup(self, value):
+        """Validate the schedule an organiser built in the event form.
+
+        None means "not submitted" — the event's locations are left alone. An
+        empty list means "the organiser removed them all", which is a real
+        instruction and must clear the existing rows.
+        """
+        if value is None or value == '':
+            return None
+        if isinstance(value, str):
+            import json
+            try:
+                value = json.loads(value)
+            except ValueError:
+                raise serializers.ValidationError('Locations must be a list.')
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Locations must be a list.')
+        if len(value) > 10:
+            raise serializers.ValidationError('Add no more than 10 locations to one event.')
+
+        cleaned = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise serializers.ValidationError('Each location must be an object.')
+            name = str(item.get('name', '')).strip()
+            venue = str(item.get('venue', '')).strip()
+            starts_at = item.get('starts_at') or None
+            # A row with nothing in it is a half-finished repeater entry, not
+            # an error — drop it rather than blocking the whole save.
+            if not name and not venue and not starts_at:
+                continue
+            if not name:
+                raise serializers.ValidationError(
+                    'Give every location a name, such as "Church" or "Reception".'
+                )
+            if starts_at:
+                parsed = serializers.DateTimeField().to_internal_value(starts_at)
+            else:
+                parsed = None
+            cleaned.append({'name': name[:120], 'venue': venue[:255], 'starts_at': parsed})
+        return cleaned
+
+    def _apply_locations(self, event, locations):
+        """Replace the event's schedule with `locations`, preserving order.
+
+        Replace rather than merge: the form submits the whole schedule every
+        time, so a row the organiser deleted must disappear.
+        """
+        event.locations.all().delete()
+        if not locations:
+            return
+        EventLocation.objects.bulk_create([
+            EventLocation(
+                event=event,
+                name=item['name'],
+                venue=item['venue'],
+                starts_at=item['starts_at'],
+                sort_order=position,
+            )
+            for position, item in enumerate(locations)
+        ])
+
     @transaction.atomic
     def create(self, validated_data):
         create_rsvp_workflow = validated_data.pop('create_rsvp_workflow', False)
+        locations_setup = validated_data.pop('locations_setup', None)
         seating_setup = validated_data.pop('seating_setup', [])
         requirements_setup = validated_data.pop('requirements_setup', [])
         if create_rsvp_workflow:
@@ -330,6 +407,8 @@ class EventSerializer(serializers.ModelSerializer):
             validated_data['preferences_enabled'] = False
             validated_data['pass_send_at'] = None
         event = super().create(validated_data)
+        if locations_setup is not None:
+            self._apply_locations(event, locations_setup)
         if seating_setup:
             create_initial_seating_setup(event, seating_setup)
         if requirements_setup:
@@ -353,6 +432,19 @@ class EventSerializer(serializers.ModelSerializer):
             request = self.context.get('request')
             created_by = request.user if request and request.user.is_authenticated else None
             RsvpWorkflow.objects.create(event=event, created_by=created_by)
+        return event
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        locations_setup = validated_data.pop('locations_setup', None)
+        # These are create-only; ignore them on edit rather than re-running
+        # setup and duplicating an event's tables or requirements.
+        validated_data.pop('seating_setup', None)
+        validated_data.pop('requirements_setup', None)
+        validated_data.pop('create_rsvp_workflow', None)
+        event = super().update(instance, validated_data)
+        if locations_setup is not None:
+            self._apply_locations(event, locations_setup)
         return event
 
     def validate_seating_setup(self, value):

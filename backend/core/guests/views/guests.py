@@ -6,11 +6,12 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import CharField, Count, OuterRef, Q, Subquery
 
 from ..models import Event, Guest, SeatingTable
 from ..serializers import CheckInGuestSerializer, GuestSerializer, GuestListSerializer
 from ..tasks import generate_guest_assets, send_whatsapp_pass, bulk_send_whatsapp_passes
+from ..whatsapp import _normalise_phone
 from accounts.permissions import (
     IsAuthenticatedAnyRole,
     IsEventManagerOrAbove,
@@ -22,6 +23,25 @@ from accounts.models import MembershipRole
 from .guest_actions import GuestBulkExportMixin
 
 logger = logging.getLogger(__name__)
+
+
+def _duplicate_phone_guest_ids(queryset):
+    """Find every guest belonging to a repeated normalized number per event."""
+    groups = {}
+    for guest_id, event_id, phone_number in (
+        queryset.exclude(phone_number='')
+        .values_list('id', 'event_id', 'phone_number')
+        .iterator()
+    ):
+        phone_key = _normalise_phone(phone_number)
+        if phone_key:
+            groups.setdefault((event_id, phone_key), []).append(guest_id)
+    return [
+        guest_id
+        for guest_ids in groups.values()
+        if len(guest_ids) > 1
+        for guest_id in guest_ids
+    ]
 
 
 class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
@@ -62,6 +82,39 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
         params = self.request.query_params
         if e := params.get('event'):
             qs = qs.filter(event_id=e)
+            # The guestbook shows the RSVP state owned by this event's single
+            # workflow without changing the Guest persistence model.
+            from rsvp.models import RsvpRecipient
+
+            recipient = RsvpRecipient.objects.filter(
+                workflow__event_id=e,
+                guest_id=OuterRef('pk'),
+            )
+            qs = qs.annotate(
+                rsvp_response_status=Subquery(
+                    recipient.values('response_status')[:1],
+                    output_field=CharField(),
+                ),
+                rsvp_invitation_status=Subquery(
+                    recipient.values('invitation_status')[:1],
+                    output_field=CharField(),
+                ),
+                rsvp_pass_status=Subquery(
+                    recipient.values('pass_status')[:1],
+                    output_field=CharField(),
+                ),
+            )
+        if rsvp_status := params.get('rsvp_status'):
+            from rsvp.services import guest_ids_for_rsvp_state
+
+            if not params.get('event'):
+                qs = qs.none()
+            else:
+                qs = qs.filter(pk__in=guest_ids_for_rsvp_state(
+                    params['event'], rsvp_status,
+                ))
+        if params.get('duplicate_phone') == '1':
+            qs = qs.filter(id__in=_duplicate_phone_guest_ids(qs))
         if search := params.get('search'):
             name_qs = qs.filter(full_name__icontains=search)
             # Only super admins may search by phone number
@@ -114,6 +167,22 @@ class GuestViewSet(GuestBulkExportMixin, viewsets.ModelViewSet):
             wa_sent=Count('id', filter=Q(whatsapp_sent=True)),
             wa_unsent=Count('id', filter=Q(whatsapp_sent=False)),
         )
+        agg.update({
+            'has_rsvp': False,
+            'confirmed': 0,
+            'declined': 0,
+            'awaiting': 0,
+            'delivery_failed': 0,
+        })
+        if event_id := request.query_params.get('event'):
+            from rsvp.services import guest_rsvp_summary
+
+            rsvp_summary = guest_rsvp_summary(
+                event_id,
+                guest_ids=qs.values_list('pk', flat=True),
+            )
+            if rsvp_summary is not None:
+                agg.update(rsvp_summary)
         response.data['stats'] = agg
         return response
 

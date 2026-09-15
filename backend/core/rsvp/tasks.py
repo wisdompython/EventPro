@@ -2,46 +2,33 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
+from accounts.messaging_settings import messaging_settings_for
 from guests.send_budget import DISPATCHED_STALE_AFTER, remaining_send_budget
 
 logger = logging.getLogger(__name__)
 
-RSVP_MESSAGES_PER_MINUTE = 20
+# Worker-level ceiling. Celery binds a task's rate_limit at import time, so it
+# cannot be per-organization and changing it needs a worker restart. The
+# per-organization pace is applied inside the send tasks by guests.pacing and
+# can only slow a send down relative to this ceiling. The limit is per worker
+# process: real throughput is this number times the worker count.
+RSVP_MESSAGES_PER_MINUTE = settings.WHATSAPP_WORKER_RATE_LIMIT_PER_MINUTE
 RSVP_RATE_LIMIT = f'{RSVP_MESSAGES_PER_MINUTE}/m'
-
-# Meta can accept a template send and later report a delivery failure through
-# the status webhook (per-user marketing caps such as "healthy ecosystem
-# engagement", spam/rate limits). Those recipients land in FAILED without the
-# send task ever seeing an exception, so the Beat dispatcher retries them
-# automatically, up to this many attempts.
-FAILED_SEND_MAX_AUTO_RETRIES = 3
 
 # Per-user marketing caps (error 131049, "healthy ecosystem engagement").
 # Meta's guidance is to wait about 24 hours before retrying — the cap is on
 # a daily-ish per-user window, so earlier attempts just fail again and burn
-# budget. One attempt per day.
+# budget. One attempt per day by default.
 ECOSYSTEM_FAILURE_MARKERS = (
     '131049',
     'healthy ecosystem engagement',
     'healthy ecosystem',
     'meta chose not to deliver',
-)
-ECOSYSTEM_RETRY_DELAYS = (
-    timedelta(hours=24),
-    timedelta(hours=24),
-    timedelta(hours=24),
-)
-
-# Quick-clearing transient errors (throughput, rate/spam limits, generic
-# temporary failures) are worth retrying much sooner, with escalation.
-FAILED_SEND_RETRY_DELAYS = (
-    timedelta(hours=1),
-    timedelta(hours=4),
-    timedelta(hours=12),
 )
 
 # Lower-cased substrings of Meta error messages that are worth retrying.
@@ -65,13 +52,19 @@ def is_retryable_failure(error_text: str) -> bool:
     return any(marker in error_text for marker in RETRYABLE_FAILURE_MARKERS)
 
 
-def retry_delay_for(error_text: str, attempts: int) -> timedelta:
-    """Delay to wait after the previous attempt before retrying this error."""
+def retry_delay_for(error_text: str, attempts: int, organization_id=None) -> timedelta:
+    """Delay to wait after the previous attempt before retrying this error.
+
+    The schedule is indexed by attempt count, with the last entry repeating.
+    messaging_settings_for() guarantees a non-empty schedule even if a row
+    stored an empty list, so this cannot IndexError on a real send.
+    """
+    resolved = messaging_settings_for(organization_id)
     error_text = (error_text or '').lower()
     if any(marker in error_text for marker in ECOSYSTEM_FAILURE_MARKERS):
-        schedule = ECOSYSTEM_RETRY_DELAYS
+        schedule = resolved.ecosystem_retry_delays
     else:
-        schedule = FAILED_SEND_RETRY_DELAYS
+        schedule = resolved.failed_send_retry_delays
     return schedule[min(attempts, len(schedule) - 1)]
 
 
@@ -145,6 +138,7 @@ def _claim_and_dispatch(candidates, limit, now, *, updates, stamp_field, send_ta
 
 def _retry_failed_sends(
     now, budget, *,
+    organization_id,
     base_filters, status_field, failed_value, queued_value,
     stamp_field, retries_field, error_field, send_task,
 ):
@@ -158,17 +152,22 @@ def _retry_failed_sends(
 
     if budget <= 0:
         return 0
+    max_auto_retries = messaging_settings_for(organization_id).failed_send_max_auto_retries
+    if max_auto_retries <= 0:
+        return 0
     retryable_errors = Q()
     for marker in RETRYABLE_FAILURE_MARKERS:
         retryable_errors |= Q(**{f'{error_field}__icontains': marker})
         retryable_errors |= Q(last_error__icontains=marker)
 
+    # base_filters already carries the organization scope (see `live` in
+    # _dispatch_for_organization); re-adding it here would collide.
     rows = RsvpRecipient.objects.filter(
         retryable_errors,
         **base_filters,
         **{
             status_field: failed_value,
-            f'{retries_field}__lt': FAILED_SEND_MAX_AUTO_RETRIES,
+            f'{retries_field}__lt': max_auto_retries,
         },
     ).values(
         'id', error_field, 'last_error', retries_field, stamp_field,
@@ -182,7 +181,7 @@ def _retry_failed_sends(
         if not is_retryable_failure(error_text):
             continue
         attempts = row[retries_field]
-        delay = retry_delay_for(error_text, attempts)
+        delay = retry_delay_for(error_text, attempts, organization_id)
         last_attempt = row[stamp_field]
         if last_attempt and now - last_attempt < delay:
             continue
@@ -228,13 +227,14 @@ def queue_workflow_invitations(workflow_id: int):
     from .models import RsvpRecipient, RsvpWorkflow
 
     try:
-        workflow = RsvpWorkflow.objects.get(pk=workflow_id)
+        workflow = RsvpWorkflow.objects.select_related('event').get(pk=workflow_id)
     except RsvpWorkflow.DoesNotExist:
         return {'queued': 0, 'reason': 'workflow not found'}
 
     if workflow.status != RsvpWorkflow.Status.ACTIVE:
         return {'queued': 0, 'reason': 'workflow is not active'}
 
+    organization_id = workflow.event.organization_id
     now = timezone.now()
     candidates = RsvpRecipient.objects.filter(
         workflow=workflow,
@@ -245,7 +245,7 @@ def queue_workflow_invitations(workflow_id: int):
     total = candidates.count()
     queued = _claim_and_dispatch(
         candidates,
-        min(remaining_send_budget(now), total),
+        min(remaining_send_budget(now, organization_id), total),
         now,
         updates={'invitation_queued_at': now},
         stamp_field='invitation_queued_at',
@@ -257,10 +257,11 @@ def queue_workflow_invitations(workflow_id: int):
             'RSVP workflow %s: %s invitations deferred until the daily send '
             'window frees up.', workflow_id, deferred,
         )
+    per_minute = messaging_settings_for(organization_id).rsvp_messages_per_minute
     return {
         'queued': queued,
         'deferred': deferred,
-        'estimated_minutes': round(queued / RSVP_MESSAGES_PER_MINUTE, 1),
+        'estimated_minutes': round(queued / per_minute, 1) if per_minute else None,
     }
 
 
@@ -274,6 +275,7 @@ def send_rsvp_invitation(self, recipient_id: int):
             RsvpRecipient.objects
             .select_related(
                 'workflow__invitation_template',
+                'workflow__event',
                 'workflow__event__name_font',
                 'guest__event',
             )
@@ -298,6 +300,10 @@ def send_rsvp_invitation(self, recipient_id: int):
     )
     if not claimed:
         return {'sent': False, 'reason': 'invitation already claimed'}
+
+    # Per-organization pace, applied within the worker's rate-limit ceiling.
+    from guests.pacing import pace_send
+    pace_send(recipient.workflow.event.organization_id, channel='rsvp')
 
     try:
         sent_update = send_invitation(recipient)
@@ -367,6 +373,9 @@ def send_confirmed_pass(self, recipient_id: int):
     if not claimed:
         return {'sent': False, 'reason': 'pass already claimed'}
 
+    from guests.pacing import pace_send
+    pace_send(recipient.workflow.event.organization_id, channel='rsvp')
+
     try:
         _ensure_guest_pass(recipient)
         sent_update = send_configured_pass(recipient)
@@ -403,7 +412,13 @@ def send_confirmed_pass(self, recipient_id: int):
 def dispatch_scheduled_rsvp_messages():
     """Queue due RSVP invitations and passes exactly once, within budget.
 
-    Spends the remaining daily send budget in priority order:
+    This Beat sweep spans every tenant. Each organization has its own Meta
+    messaging tier, so budget is resolved and spent per organization — one
+    workspace at its cap must not stop another's sends. Only organizations
+    with live workflows are considered, so idle tenants cost one query.
+
+    Within an organization the remaining daily budget is spent in priority
+    order:
       1. dispatched sends gone stale (lost worker / exhausted retries)
       2. scheduled passes now due (confirmed guests come first)
       3. transient pass failures eligible for an automatic retry
@@ -413,15 +428,41 @@ def dispatch_scheduled_rsvp_messages():
     Whatever doesn't fit is picked up on a later tick as the trailing 24h
     window frees up.
     """
-    from .models import RsvpRecipient, RsvpWorkflow
+    from .models import RsvpWorkflow
 
     now = timezone.now()
+    organization_ids = list(
+        RsvpWorkflow.objects.filter(
+            status=RsvpWorkflow.Status.ACTIVE,
+            event__date__gt=now,
+        ).values_list('event__organization_id', flat=True).distinct()
+    )
+
+    totals = {
+        'invitations_queued': 0,
+        'passes_queued': 0,
+        'requeued_stale': 0,
+        'retried_failed': 0,
+        'budget_left': 0,
+    }
+    for organization_id in organization_ids:
+        result = _dispatch_for_organization(organization_id, now)
+        for key in totals:
+            totals[key] += result[key]
+    return totals
+
+
+def _dispatch_for_organization(organization_id, now):
+    """Spend one organization's remaining daily budget in priority order."""
+    from .models import RsvpRecipient, RsvpWorkflow
+
     stale_before = now - DISPATCHED_STALE_AFTER
-    budget = remaining_send_budget(now)
+    budget = remaining_send_budget(now, organization_id)
 
     live = {
         'workflow__status': RsvpWorkflow.Status.ACTIVE,
         'workflow__event__date__gt': now,
+        'workflow__event__organization_id': organization_id,
     }
 
     stale_passes = RsvpRecipient.objects.filter(
@@ -473,6 +514,7 @@ def dispatch_scheduled_rsvp_messages():
 
     retried_passes = _retry_failed_sends(
         now, budget,
+        organization_id=organization_id,
         base_filters={
             'response_status': RsvpRecipient.ResponseStatus.CONFIRMED,
             **live,
@@ -521,6 +563,7 @@ def dispatch_scheduled_rsvp_messages():
 
     retried_invitations = _retry_failed_sends(
         now, budget,
+        organization_id=organization_id,
         base_filters={
             'response_status': RsvpRecipient.ResponseStatus.AWAITING,
             **live,

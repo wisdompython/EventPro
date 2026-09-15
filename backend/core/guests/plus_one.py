@@ -38,9 +38,7 @@ def validate_named_plus_one(primary_guest, full_name: str, phone_number: str):
         )
 
     existing_plus_one = get_named_plus_one(primary_guest)
-    candidates = Guest.objects.filter(event_id=primary_guest.event_id).exclude(
-        pk=primary_guest.pk,
-    )
+    candidates = Guest.objects.filter(event_id=primary_guest.event_id)
     if existing_plus_one:
         candidates = candidates.exclude(pk=existing_plus_one.pk)
     for candidate_phone in candidates.exclude(phone_number='').values_list(

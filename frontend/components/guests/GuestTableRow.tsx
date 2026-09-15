@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Guest } from '@/lib/api'
 
 const WA_STATUS_LABEL: Record<string, string> = {
-  read: 'Read', delivered: 'Delivered', sent: 'Sent', failed: 'Failed', pending: '',
+  read: 'Read', delivered: 'Delivered', sent: 'Sent', failed: 'Failed', queued: 'Queued', sending: 'Sending', not_sent: 'Not sent', pending: '',
 }
 const WA_DOT: Record<string, string> = {
   read: 'var(--brand)', delivered: 'var(--brand)', sent: 'var(--muted)', failed: 'var(--danger)',
@@ -13,6 +13,11 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
   checked_in: { bg: 'var(--brand-soft)', color: 'var(--brand)', label: 'CHECKED-IN' },
   registered:  { bg: 'rgba(245,158,11,0.14)',  color: 'var(--warn)',  label: 'PENDING' },
   no_show:     { bg: 'rgba(239,68,68,0.14)',    color: 'var(--danger)', label: 'NO-SHOW' },
+  confirmed:   { bg: 'var(--success-bg)', color: 'var(--success)', label: 'CONFIRMED' },
+  awaiting:    { bg: 'rgba(245,158,11,0.14)', color: 'var(--warn)', label: 'AWAITING' },
+  declined:    { bg: 'rgba(239,68,68,0.14)', color: 'var(--danger)', label: 'DECLINED' },
+  failed:      { bg: 'rgba(239,68,68,0.14)', color: 'var(--danger)', label: 'DELIVERY FAILED' },
+  not_contacted: { bg: 'var(--chip)', color: 'var(--muted)', label: 'NOT DELIVERED' },
 }
 
 interface Props {
@@ -26,10 +31,15 @@ interface Props {
 
 export function GuestTableRow({ g, isSel, deleting, showPhone = false, onToggleSelect, onDelete }: Props) {
   const initials = g.full_name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
-  const st = g.status === 'checked_in' ? STATUS_STYLE.checked_in : STATUS_STYLE.registered
+  const rsvpStatus = g.rsvp_response_status === 'confirmed' ? 'confirmed'
+    : g.rsvp_response_status === 'declined' ? 'declined'
+      : g.rsvp_invitation_status === 'failed' ? 'failed'
+        : g.rsvp_response_status === 'awaiting' && (g.rsvp_invitation_status === 'delivered' || g.rsvp_invitation_status === 'read') ? 'awaiting'
+          : g.rsvp_response_status === 'awaiting' ? 'not_contacted' : null
+  const st = g.status === 'checked_in' ? STATUS_STYLE.checked_in : STATUS_STYLE[rsvpStatus ?? 'registered']
   const checkedInTime = g.checked_in_at
     ? new Date(g.checked_in_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : null
-  const waStatus = g.whatsapp_sent ? 'delivered' : 'pending'
+  const waStatus = g.rsvp_invitation_status ?? (g.whatsapp_sent ? 'delivered' : 'pending')
   const waLabel = WA_STATUS_LABEL[waStatus] || ''
   const waDot = WA_DOT[waStatus] || 'var(--muted-2)'
   const ticketLabel = g.ticket_type === 'vip' ? 'VIP' : g.ticket_type === 'vvip' ? 'VVIP'

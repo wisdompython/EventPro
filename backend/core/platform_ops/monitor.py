@@ -325,9 +325,40 @@ def build_queue_monitor_snapshot():
                 RSVP_MESSAGES_PER_MINUTE * message_workers
             ),
         },
-        'send_budget': {
-            'daily_limit': daily_send_limit(),
-            'remaining': remaining_send_budget(),
-            'window_hours': int(timedelta(days=1).total_seconds() / 3600),
-        },
+        'send_budget': _send_budget_by_organization(),
+    }
+
+
+def _send_budget_by_organization():
+    """Per-tenant send budgets, plus the cross-tenant totals.
+
+    The budget is per organization (each tenant has its own WhatsApp Business
+    account and messaging tier), so a single global number would be
+    meaningless. This view is platform-superuser only, so it may report every
+    tenant; the tenant-facing settings page reports only its own.
+    """
+    from accounts.models import Organization
+
+    organizations = []
+    total_limit = 0
+    total_remaining = 0
+    for organization_id, name in Organization.objects.filter(
+        is_active=True,
+    ).values_list('id', 'name'):
+        limit = daily_send_limit(organization_id)
+        remaining = remaining_send_budget(organization_id=organization_id)
+        total_limit += limit
+        total_remaining += remaining
+        organizations.append({
+            'organization_id': organization_id,
+            'organization': name,
+            'daily_limit': limit,
+            'remaining': remaining,
+        })
+    organizations.sort(key=lambda row: row['remaining'])
+    return {
+        'window_hours': int(timedelta(days=1).total_seconds() / 3600),
+        'organizations': organizations,
+        'total_daily_limit': total_limit,
+        'total_remaining': total_remaining,
     }

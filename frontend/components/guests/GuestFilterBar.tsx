@@ -34,19 +34,22 @@ interface Props {
   onRegisteredFromChange: (v: string) => void
   onRegisteredToChange: (v: string) => void
   ticketTypes: TicketTypeDef[]
+  hasRsvp: boolean
 }
 
 export function GuestFilterBar({
   tokens, freeText, filteredCount, totalCount, page, pageSize, selectedCount, inputRef, onQueryChange,
   sort, onSortChange, registeredFrom, registeredTo, onRegisteredFromChange, onRegisteredToChange,
-  ticketTypes,
+  ticketTypes, hasRsvp,
 }: Props) {
   const start = totalCount === 0 ? 0 : (page - 1) * pageSize + 1
   const end   = Math.min(page * pageSize, totalCount)
   const statusFilter = tokens.find((token) => token.key === 'status')?.value ?? ''
   const ticketFilter = tokens.find((token) => token.key === 'ticket')?.value ?? ''
   const whatsappFilter = tokens.find((token) => token.key === 'wa')?.value ?? ''
-  const hasFilters = Boolean(statusFilter || ticketFilter || whatsappFilter || registeredFrom || registeredTo || sort)
+  const duplicateFilter = tokens.find((token) => token.key === 'duplicates')?.value ?? ''
+  const rsvpFilter = tokens.find((token) => token.key === 'rsvp')?.value ?? ''
+  const hasFilters = Boolean(statusFilter || ticketFilter || whatsappFilter || duplicateFilter || rsvpFilter || registeredFrom || registeredTo || sort)
 
   function changeToken(key: string, value: string) {
     const nextTokens = tokens
@@ -101,15 +104,28 @@ export function GuestFilterBar({
         <span className="self-center pr-1 text-xs font-semibold" style={{ color: 'var(--ink-2)' }}>Filter by</span>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Guest status</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Entry status</span>
           <select value={statusFilter} onChange={(e) => changeToken('status', e.target.value)}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-soft)]"
             style={{ border: '1px solid var(--line)', background: 'var(--field)', color: 'var(--ink)' }}>
             <option value="">All statuses</option>
-            <option value="pending">Pending</option>
+            <option value="pending">Not checked in</option>
             <option value="checked_in">Checked in</option>
           </select>
         </label>
+
+        {hasRsvp && <label className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>RSVP state</span>
+          <select value={rsvpFilter} onChange={(e) => changeToken('rsvp', e.target.value)}
+            className="rounded-md px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-soft)]"
+            style={{ border: '1px solid var(--line)', background: 'var(--field)', color: 'var(--ink)' }}>
+            <option value="">All RSVP states</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="awaiting">Awaiting reply</option>
+            <option value="declined">Declined</option>
+            <option value="delivery_failed">Delivery failed</option>
+          </select>
+        </label>}
 
         <label className="flex flex-col gap-1">
           <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Ticket</span>
@@ -131,6 +147,21 @@ export function GuestFilterBar({
             <option value="failed">Not sent</option>
           </select>
         </label>
+
+        <button
+          type="button"
+          aria-pressed={duplicateFilter === 'phone'}
+          onClick={() => changeToken('duplicates', duplicateFilter === 'phone' ? '' : 'phone')}
+          className="self-end rounded-md px-2.5 py-1.5 text-xs font-semibold transition hover:opacity-90"
+          style={{
+            border: `1px solid ${duplicateFilter === 'phone' ? 'var(--brand)' : 'var(--line)'}`,
+            background: duplicateFilter === 'phone' ? 'var(--brand-soft)' : 'var(--field)',
+            color: duplicateFilter === 'phone' ? 'var(--brand)' : 'var(--ink)',
+          }}
+          title="Show every guest whose phone number is used more than once in this event"
+        >
+          Duplicate numbers
+        </button>
 
         <div className="flex flex-col gap-1">
           <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Registration date</span>

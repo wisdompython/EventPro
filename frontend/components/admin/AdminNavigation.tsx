@@ -32,6 +32,7 @@ export const ADMIN_NAV: Array<{ label: string; items: AdminNavItem[] }> = [
   ]},
   { label: 'Company', items: [
     { href: '/admin/company-profile', label: 'Company profile', icon: 'settings', minRole: 'super_admin' },
+    { href: '/admin/settings', label: 'Messaging settings', icon: 'settings', minRole: 'super_admin' },
     { href: '/admin/crew-access', label: 'Crew access', icon: 'team', minRole: 'super_admin', tourId: 'nav-team' },
     { href: '/admin/playbook', label: 'Playbook', icon: 'docs', minRole: 'check_in_staff' },
     { href: '/admin/delivery-monitor', label: 'Delivery monitor', icon: 'queue', minRole: 'super_admin', platformOnly: true },

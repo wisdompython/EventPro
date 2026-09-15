@@ -13,14 +13,19 @@ type FilterToken = { key: string; value: string }
 
 function parseTokens(input: string): { tokens: FilterToken[]; freeText: string } {
   const tokens: FilterToken[] = []
-  let freeText = ''
-  const parts = input.split(/\s+/)
-  for (const part of parts) {
-    const m = part.match(/^(\w+):(\S+)$/)
-    if (m) tokens.push({ key: m[1], value: m[2] })
-    else freeText += (freeText ? ' ' : '') + part
+  const freeTextParts: string[] = []
+  const tokenPattern = /(^|\s+)(\w+):(\S+)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = tokenPattern.exec(input)) !== null) {
+    freeTextParts.push(input.slice(lastIndex, match.index))
+    tokens.push({ key: match[2], value: match[3] })
+    lastIndex = match.index + match[0].length
   }
-  return { tokens, freeText: freeText.trim() }
+  freeTextParts.push(input.slice(lastIndex))
+  // Preserve trailing whitespace so typing a space does not get undone by the
+  // controlled input on its next render. The API receives a trimmed copy.
+  return { tokens, freeText: freeTextParts.join('').trimStart() }
 }
 
 export default function GuestsPage() {
@@ -49,9 +54,12 @@ export default function GuestsPage() {
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE))
 
   const { tokens, freeText } = parseTokens(query)
+  const searchTerm = freeText.trim()
   const statusToken = tokens.find((t) => t.key === 'status')?.value ?? ''
   const ticketToken = tokens.find((t) => t.key === 'ticket')?.value ?? ''
   const waToken     = tokens.find((t) => t.key === 'wa')?.value ?? ''
+  const duplicatesToken = tokens.find((t) => t.key === 'duplicates')?.value ?? ''
+  const rsvpToken = tokens.find((t) => t.key === 'rsvp')?.value ?? ''
 
   useEffect(() => {
     api.getEvents().then((items) => {
@@ -62,16 +70,18 @@ export default function GuestsPage() {
   }, [])
 
   // reset to page 1 when filters or event changes
-  useEffect(() => { setPage(1) }, [selectedEvent?.id, freeText, statusToken, ticketToken, waToken, sort, registeredFrom, registeredTo])
+  useEffect(() => { setPage(1) }, [selectedEvent?.id, searchTerm, statusToken, ticketToken, waToken, duplicatesToken, rsvpToken, sort, registeredFrom, registeredTo])
 
   useEffect(() => {
     if (!selectedEvent) return
     setLoading(true)
     setSelected(new Set())
     const params: Record<string, string> = { event: String(selectedEvent.id), page: String(page) }
-    if (freeText)    params.search      = freeText
+    if (searchTerm)  params.search      = searchTerm
     if (statusToken) params.status      = statusToken === 'pending' ? 'registered' : statusToken
     if (ticketToken) params.ticket_type = ticketToken
+    if (duplicatesToken === 'phone') params.duplicate_phone = '1'
+    if (rsvpToken) params.rsvp_status = rsvpToken
     if (waToken === 'failed')                           params.wa_sent = 'false'
     else if (waToken === 'sent' || waToken === 'read' || waToken === 'delivered') params.wa_sent = 'true'
     if (sort)           params.ordering          = sort
@@ -81,7 +91,7 @@ export default function GuestsPage() {
       .then((data) => { setGuests(data.results); setCount(data.count); setStats(data.stats ?? null) })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [selectedEvent, freeText, statusToken, ticketToken, waToken, sort, registeredFrom, registeredTo, page])
+  }, [selectedEvent, searchTerm, statusToken, ticketToken, waToken, duplicatesToken, rsvpToken, sort, registeredFrom, registeredTo, page])
 
   const filtered = guests
 
@@ -106,9 +116,21 @@ export default function GuestsPage() {
         setStats((current) => current ? {
           ...current,
           checked_in: Math.max(0, current.checked_in - (guest.status === 'checked_in' ? 1 : 0)),
-          pending: Math.max(0, current.pending - (guest.status === 'checked_in' ? 0 : 1)),
+          pending: Math.max(0, current.pending - (
+            guest.status !== 'checked_in'
+            && (!current.has_rsvp || guest.rsvp_response_status === 'confirmed') ? 1 : 0
+          )),
           wa_sent: Math.max(0, current.wa_sent - (guest.whatsapp_sent ? 1 : 0)),
           wa_unsent: Math.max(0, current.wa_unsent - (guest.whatsapp_sent ? 0 : 1)),
+          confirmed: Math.max(0, current.confirmed - (guest.rsvp_response_status === 'confirmed' ? 1 : 0)),
+          declined: Math.max(0, current.declined - (guest.rsvp_response_status === 'declined' ? 1 : 0)),
+          awaiting: Math.max(0, current.awaiting - (
+            guest.rsvp_response_status === 'awaiting'
+            && (guest.rsvp_invitation_status === 'delivered' || guest.rsvp_invitation_status === 'read') ? 1 : 0
+          )),
+          delivery_failed: Math.max(0, current.delivery_failed - (
+            guest.rsvp_invitation_status === 'failed' || guest.rsvp_pass_status === 'failed' ? 1 : 0
+          )),
         } : current)
       }
     } catch (err) {
@@ -248,7 +270,9 @@ export default function GuestsPage() {
               <span className="ml-2 text-base font-normal" style={{ color: 'var(--muted)' }}>• {count}</span>
             </h1>
             <p className="text-xs" style={{ color: 'var(--muted)' }}>
-              {checkedIn} checked in · {pending} pending
+              {checkedIn} checked in · {stats?.has_rsvp
+                ? `${stats.confirmed} confirmed · ${stats.awaiting} awaiting · ${stats.declined} declined${stats.delivery_failed ? ` · ${stats.delivery_failed} failed` : ''}`
+                : `${pending} pending`}
             </p>
           </div>
         </div>
@@ -321,6 +345,7 @@ export default function GuestsPage() {
         registeredFrom={registeredFrom} registeredTo={registeredTo}
         onRegisteredFromChange={setRegisteredFrom} onRegisteredToChange={setRegisteredTo}
         ticketTypes={selectedEvent.ticket_types ?? []}
+        hasRsvp={Boolean(selectedEvent.rsvp_workflow_id)}
       />
 
       <div className="flex-1 overflow-auto">

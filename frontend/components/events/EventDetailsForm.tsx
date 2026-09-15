@@ -5,6 +5,7 @@ import { Event } from '@/lib/api'
 import { toWatDateTimeInput } from '@/lib/datetime'
 import { FormSectionHeader } from '@/components/ui/FormSectionHeader'
 import { DateTimePicker } from '@/components/ui/DateTimePicker'
+import { EventLocationsField } from './EventLocationsField'
 
 const field = 'form-control'
 const label = 'form-label'
@@ -93,6 +94,8 @@ export function EventDetailsForm({ event, localDateValue, subtitle, step, showRs
             placeholder="e.g. Eko Hotel, Lagos" className={field} />
           <p className="form-hint">You can leave this blank and add it when confirmed.</p>
         </div>
+
+        <EventLocationsField event={event} />
 
         <div className="sm:col-span-2">
           <label className={label}>Description <span className="font-normal text-[var(--muted)]">(optional)</span></label>

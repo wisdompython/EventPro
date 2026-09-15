@@ -3,7 +3,12 @@ from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import RsvpRecipient, RsvpWorkflow
+from .models import (
+    INVITATION_RECEIVED_STATUSES,
+    PASS_SENT_STATUSES,
+    RsvpRecipient,
+    RsvpWorkflow,
+)
 from accounts.tenancy import get_request_organization
 
 
@@ -29,7 +34,13 @@ class RsvpStatsSerializer(serializers.Serializer):
 def build_workflow_stats(workflow):
     counts = workflow.recipients.aggregate(
         invited=Count('id'),
-        awaiting=Count('id', filter=Q(response_status=RsvpRecipient.ResponseStatus.AWAITING)),
+        awaiting=Count(
+            'id',
+            filter=Q(
+                response_status=RsvpRecipient.ResponseStatus.AWAITING,
+                invitation_status__in=INVITATION_RECEIVED_STATUSES,
+            ),
+        ),
         confirmed=Count('id', filter=Q(response_status=RsvpRecipient.ResponseStatus.CONFIRMED)),
         confirmed_primary=Count(
             'id',
@@ -41,19 +52,12 @@ def build_workflow_stats(workflow):
         declined=Count('id', filter=Q(response_status=RsvpRecipient.ResponseStatus.DECLINED)),
         invitation_delivered=Count(
             'id',
-            filter=Q(invitation_status__in=[
-                RsvpRecipient.InvitationStatus.DELIVERED,
-                RsvpRecipient.InvitationStatus.READ,
-            ]),
+            filter=Q(invitation_status__in=INVITATION_RECEIVED_STATUSES),
         ),
         invitation_failed=Count('id', filter=Q(invitation_status=RsvpRecipient.InvitationStatus.FAILED)),
         passes_sent=Count(
             'id',
-            filter=Q(pass_status__in=[
-                RsvpRecipient.PassStatus.SENT,
-                RsvpRecipient.PassStatus.DELIVERED,
-                RsvpRecipient.PassStatus.READ,
-            ]),
+            filter=Q(pass_status__in=PASS_SENT_STATUSES),
         ),
         passes_failed=Count('id', filter=Q(pass_status=RsvpRecipient.PassStatus.FAILED)),
         delivery_failed=Count(
@@ -67,11 +71,7 @@ def build_workflow_stats(workflow):
         confirmed_no_pass=Count(
             'id',
             filter=Q(response_status=RsvpRecipient.ResponseStatus.CONFIRMED)
-            & ~Q(pass_status__in=[
-                RsvpRecipient.PassStatus.SENT,
-                RsvpRecipient.PassStatus.DELIVERED,
-                RsvpRecipient.PassStatus.READ,
-            ]),
+            & ~Q(pass_status__in=PASS_SENT_STATUSES),
         ),
         aso_ebi_requests=Count(
             'id',
@@ -332,6 +332,10 @@ class RsvpRecipientSerializer(serializers.ModelSerializer):
     primary_guest_name = serializers.SerializerMethodField()
     celebrant_name = serializers.CharField(source='guest.celebrant_name', read_only=True)
     has_phone = serializers.SerializerMethodField()
+    pass_sent_at = serializers.DateTimeField(
+        source='guest.whatsapp_sent_at', read_only=True,
+    )
+    last_message_sent_at = serializers.SerializerMethodField()
 
     class Meta:
         model = RsvpRecipient
@@ -358,8 +362,10 @@ class RsvpRecipientSerializer(serializers.ModelSerializer):
             'invitation_queued_at',
             'responded_at',
             'pass_queued_at',
+            'pass_sent_at',
             'reminder_count',
             'last_reminded_at',
+            'last_message_sent_at',
             'last_error',
             'invitation_error',
             'pass_error',
@@ -380,6 +386,17 @@ class RsvpRecipientSerializer(serializers.ModelSerializer):
 
     def get_has_phone(self, obj):
         return bool(obj.guest.phone_number)
+
+    def get_last_message_sent_at(self, obj):
+        sent_dates = [
+            value for value in (
+                obj.invitation_sent_at,
+                obj.last_reminded_at,
+                obj.guest.whatsapp_sent_at,
+            )
+            if value is not None
+        ]
+        return max(sent_dates).isoformat() if sent_dates else None
 
 
 class PopulateRecipientsSerializer(serializers.Serializer):

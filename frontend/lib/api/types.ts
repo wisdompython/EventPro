@@ -122,9 +122,18 @@ export interface QueueMonitorSnapshot {
     estimated_global_ceiling_per_minute: number;
   };
   send_budget: {
-    daily_limit: number;
-    remaining: number;
     window_hours: number;
+    // The budget is per organization — each tenant has its own WhatsApp
+    // Business account and messaging tier. The totals are cross-tenant sums,
+    // meaningful only on this platform-superuser view.
+    organizations: Array<{
+      organization_id: number;
+      organization: string;
+      daily_limit: number;
+      remaining: number;
+    }>;
+    total_daily_limit: number;
+    total_remaining: number;
   };
 }
 
@@ -162,6 +171,9 @@ export interface Guest {
   whatsapp_sent_at: string | null;
   scheduled_send_at: string | null;
   registered_at: string;
+  rsvp_response_status?: RsvpResponseStatus | null;
+  rsvp_invitation_status?: RsvpInvitationStatus | null;
+  rsvp_pass_status?: RsvpPassStatus | null;
 }
 
 /** Privacy-safe operational data returned to scanner and door-desk users. */
@@ -186,6 +198,11 @@ export interface GuestListStats {
   pending: number;
   wa_sent: number;
   wa_unsent: number;
+  has_rsvp: boolean;
+  confirmed: number;
+  declined: number;
+  awaiting: number;
+  delivery_failed: number;
 }
 
 export interface GuestList {
@@ -211,11 +228,21 @@ export interface TicketTypeDef {
   label: string;
 }
 
+/** One named stop in a multi-location event's schedule. */
+export interface EventLocation {
+  id: number
+  name: string
+  venue: string
+  starts_at: string | null
+  sort_order: number
+}
+
 export interface Event {
   id: number;
   name: string;
   date: string;
   venue: string;
+  locations?: EventLocation[];
   description: string;
   rsvp_message: string;
   color_of_day: string;
@@ -324,6 +351,7 @@ export type RsvpWorkflowStatus = 'draft' | 'active' | 'paused' | 'completed';
 export type RsvpResponseStatus = 'awaiting' | 'confirmed' | 'declined';
 export type RsvpInvitationStatus = 'not_sent' | 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 export type RsvpPassStatus = 'held' | 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'not_issued';
+export type RsvpRecipientOrdering = 'name' | '-name' | 'sent' | '-sent' | 'confirmed' | '-confirmed' | 'last_message' | '-last_message';
 
 export interface RsvpStats {
   invited: number;
@@ -393,8 +421,10 @@ export interface RsvpRecipient {
   invitation_queued_at: string | null;
   responded_at: string | null;
   pass_queued_at: string | null;
+  pass_sent_at: string | null;
   reminder_count: number;
   last_reminded_at: string | null;
+  last_message_sent_at: string | null;
   last_error: string;
   invitation_error: string;
   pass_error: string;
@@ -738,4 +768,62 @@ export interface PreferenceDashboard {
   seating: PreferenceSeatingTable[];
   columns: Array<{ id: number; key: string; label: string; kind: PreferenceAnswer['kind']; unit: string }>;
   guests: PreferenceGuest[];
+}
+
+// --- Messaging settings ----------------------------------------------------
+
+/** Numeric settings take a number; the two backoff schedules take hour lists. */
+export type MessagingSettingsValue = number | number[]
+
+export interface MessagingSettingsField<T extends MessagingSettingsValue = MessagingSettingsValue> {
+  /** The value actually in force, after the platform default is applied. */
+  value: T
+  /** This workspace's own value, or null when it inherits the default. */
+  override: T | null
+  /** The platform default behind the effective value. */
+  default: T
+  source: 'organization' | 'platform'
+  min: number | null
+  max: number | null
+}
+
+export type MessagingSettingsFieldName =
+  | 'daily_send_limit'
+  | 'whatsapp_messages_per_minute'
+  | 'rsvp_messages_per_minute'
+  | 'rsvp_max_reminders'
+  | 'rsvp_reminder_cooldown_minutes'
+  | 'failed_send_max_auto_retries'
+  | 'failed_send_retry_delay_hours'
+  | 'ecosystem_retry_delay_hours'
+
+export interface MessagingSettingsPayload {
+  organization: number
+  organization_name: string
+  fields: Record<MessagingSettingsFieldName, MessagingSettingsField>
+  updated_at: string | null
+  updated_by: string | null
+  /**
+   * Read-only. Celery binds a task's rate limit when the worker imports the
+   * module, so this is a global ceiling that only changes on a worker restart.
+   */
+  worker_rate_limit: {
+    per_worker_per_minute: number
+    requires_worker_restart: boolean
+    env_var: string
+  }
+}
+
+/** null clears the override and restores the platform default. */
+export type MessagingSettingsUpdate = Partial<
+  Record<MessagingSettingsFieldName, MessagingSettingsValue | null>
+>
+
+export interface MessagingSettingsAuditEntry {
+  id: number
+  field: string
+  old_value: string
+  new_value: string
+  changed_by: string
+  changed_at: string
 }

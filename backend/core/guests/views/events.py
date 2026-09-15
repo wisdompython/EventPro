@@ -20,6 +20,7 @@ class EventViewSet(viewsets.ModelViewSet):
             Event.objects
             .filter(organization=organization)
             .select_related('name_font', 'whatsapp_template', 'rsvp_workflow')
+            .prefetch_related('locations')
             .annotate(
                 guest_count_ann=Count('guests', distinct=True),
                 checked_in_count_ann=Count(

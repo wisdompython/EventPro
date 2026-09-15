@@ -79,6 +79,10 @@ export function UploadResults({ result }: { result: UploadResult }) {
 
       {result.status === 'failed' && result.error_message && <p className="border-t border-[var(--line)] px-5 py-3 text-xs leading-5 text-[var(--danger)]">{result.error_message}</p>}
 
+      {result.status === 'done' && result.skipped > 0 && <p className="border-t border-amber-500/20 bg-amber-500/5 px-5 py-3 text-xs leading-5 text-amber-700">
+        {result.skipped} duplicate {result.skipped === 1 ? 'entry was' : 'entries were'} ignored because the phone number was already used in this event or earlier in the file.
+      </p>}
+
       {result.status === 'done' && <div className="grid gap-2 border-t border-[var(--line)] px-5 py-3 text-xs text-[var(--muted)] sm:grid-cols-3">
         <span>{result.recipients_created} RSVP recipients created</span>
         <span>{result.assets_processed} assets processed</span>

@@ -13,7 +13,7 @@ import './admin-system.css'
 const PAGE_TITLES: Record<string, string> = {
   today: 'Today', 'event-management': 'Event management', guestbook: 'Guestbook', 'door-desk': 'Door desk',
   'guest-messages': 'Guest messages', 'follow-ups': 'Follow-ups', 'rsvp-management': 'RSVP management', 'pass-studio': 'Pass studio', 'seating-plan': 'Event planner',
-  'crew-access': 'Crew access', 'company-profile': 'Company profile', playbook: 'Playbook', profile: 'My account',
+  'crew-access': 'Crew access', 'company-profile': 'Company profile', settings: 'Messaging settings', playbook: 'Playbook', profile: 'My account',
   'message-library': 'Message library', 'delivery-monitor': 'Delivery monitor', 'list-import': 'List import',
 }
 

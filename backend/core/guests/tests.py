@@ -302,6 +302,77 @@ class GuestListFilterTests(TestCase):
         self.assertEqual(stats['pending'], 1)
         self.assertEqual(stats['wa_sent'], 1)
         self.assertEqual(stats['wa_unsent'], 1)
+        self.assertFalse(stats['has_rsvp'])
+
+    def test_guest_list_uses_rsvp_aware_counters_and_filters(self):
+        from rsvp.models import RsvpRecipient, RsvpWorkflow
+
+        workflow = RsvpWorkflow.objects.create(event=self.event_a)
+        awaiting_guest = make_guest(
+            self.event_a,
+            full_name='Awaiting Reply',
+            phone_number='2348000000010',
+        )
+        confirmed_guest = make_guest(
+            self.event_a,
+            full_name='Confirmed Guest',
+            phone_number='2348000000011',
+        )
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=self.g1,
+            invitation_status=RsvpRecipient.InvitationStatus.FAILED,
+        )
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=self.g2,
+            response_status=RsvpRecipient.ResponseStatus.DECLINED,
+            invitation_status=RsvpRecipient.InvitationStatus.READ,
+        )
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=awaiting_guest,
+            invitation_status=RsvpRecipient.InvitationStatus.DELIVERED,
+        )
+        RsvpRecipient.objects.create(
+            workflow=workflow,
+            guest=confirmed_guest,
+            response_status=RsvpRecipient.ResponseStatus.CONFIRMED,
+            invitation_status=RsvpRecipient.InvitationStatus.READ,
+        )
+
+        response = self.client.get('/api/guests/', {'event': self.event_a.id})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data['stats']['confirmed'], 1)
+        self.assertEqual(response.data['stats']['declined'], 1)
+        self.assertEqual(response.data['stats']['awaiting'], 1)
+        self.assertEqual(response.data['stats']['delivery_failed'], 1)
+        self.assertEqual(response.data['stats']['pending'], 1)
+        self.assertTrue(response.data['stats']['has_rsvp'])
+        awaiting_row = next(
+            row for row in response.data['results']
+            if row['full_name'] == 'Awaiting Reply'
+        )
+        self.assertEqual(awaiting_row['rsvp_response_status'], 'awaiting')
+        self.assertEqual(awaiting_row['rsvp_invitation_status'], 'delivered')
+
+        awaiting = self.client.get('/api/guests/', {
+            'event': self.event_a.id,
+            'rsvp_status': 'awaiting',
+        })
+        failures = self.client.get('/api/guests/', {
+            'event': self.event_a.id,
+            'rsvp_status': 'delivery_failed',
+        })
+        self.assertEqual(
+            [row['full_name'] for row in awaiting.data['results']],
+            ['Awaiting Reply'],
+        )
+        self.assertEqual(
+            [row['full_name'] for row in failures.data['results']],
+            ['Alice'],
+        )
 
     def test_search_filter(self):
         r = self.client.get('/api/guests/', {'event': self.event_a.id, 'search': 'ali'})
@@ -312,6 +383,26 @@ class GuestListFilterTests(TestCase):
         r = self.client.get('/api/guests/', {'event': self.event_a.id, 'status': 'checked_in'})
         names = {g['full_name'] for g in r.data['results']}
         self.assertEqual(names, {'Bob'})
+
+    def test_duplicate_phone_filter_uses_normalized_number_within_each_event(self):
+        self.g1.phone_number = '+234 800 000 0001'
+        self.g1.save(update_fields=['phone_number'])
+        self.g2.phone_number = '08000000001'
+        self.g2.save(update_fields=['phone_number'])
+        make_guest(
+            self.event_a,
+            full_name='Unique Guest',
+            phone_number='2348000000099',
+        )
+
+        response = self.client.get('/api/guests/', {
+            'event': self.event_a.id,
+            'duplicate_phone': '1',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = {guest['full_name'] for guest in response.data['results']}
+        self.assertEqual(names, {'Alice', 'Bob'})
 
     def test_csv_export_escapes_spreadsheet_formulas(self):
         self.g1.full_name = '=HYPERLINK("https://example.com")'
@@ -779,6 +870,35 @@ class ScheduledSendCreateTests(TestCase):
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         guest_id, kwargs = mock_task.delay.call_args
         self.assertTrue(kwargs.get('send_whatsapp', True))
+
+    def test_manual_create_rejects_duplicate_normalized_phone_number(self, mock_task):
+        make_guest(
+            self.event,
+            full_name='Existing Guest',
+            phone_number='+234 800 000 0009',
+        )
+
+        response = self._create(full_name='Different Name', phone_number='08000000009')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Duplicate number', response.data['phone_number'][0])
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 1)
+        mock_task.delay.assert_not_called()
+
+    def test_manual_create_rejects_plus_one_using_primary_phone(self, mock_task):
+        self.event.allow_plus_one = True
+        self.event.save(update_fields=['allow_plus_one'])
+
+        response = self._create(
+            plus_one_attending=True,
+            plus_one_full_name='Companion',
+            plus_one_phone_number='+234 800 000 0009',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('already belongs', response.data['plus_one'].lower())
+        self.assertEqual(Guest.objects.filter(event=self.event).count(), 0)
+        mock_task.delay.assert_not_called()
 
     def test_future_scheduled_send_at_defers_send(self, mock_task):
         future = (timezone.now() + timezone.timedelta(hours=2)).isoformat()
