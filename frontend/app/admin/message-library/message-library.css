@@ -275,3 +275,15 @@
   .message-template-card:hover { transform: none; }
   .message-library-state > i { animation-duration: 1.4s; }
 }
+
+/* Which event a template's location placeholders are numbered against.
+   Without this, "Location 1" is meaningless to the person writing the
+   message — it depends on the order set on whichever event it is sent for. */
+.message-location-scope { margin-top: 13px; border-top: 1px solid rgba(35, 29, 55, 0.08); padding-top: 12px; }
+.message-location-scope > label { display: block; color: #48404e; font-family: var(--font-display); font-size: 0.62rem; font-weight: 760; }
+.message-location-scope > select { width: 100%; margin-top: 6px; border: 1px solid rgba(35, 29, 55, 0.14); border-radius: 10px 3px 10px 3px; background: #fff; padding: 8px 10px; color: #211d2b; font-size: 0.66rem; font-weight: 640; outline: none; }
+.message-location-scope > select:focus { border-color: #6757d9; box-shadow: 0 0 0 3px rgba(103, 87, 217, 0.13); }
+.message-location-scope > small { display: block; margin-top: 5px; color: #918996; font-size: 0.52rem; line-height: 1.55; }
+
+/* On a saved template: what its location numbering referred to. */
+.message-template-card__builtfor { display: inline-flex; align-items: center; gap: 5px; margin-top: 5px; border-radius: 999px; background: rgba(103, 87, 217, 0.1); padding: 2px 8px; color: #4f42b9; font-size: 0.52rem; font-weight: 780; }

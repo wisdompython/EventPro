@@ -1,5 +1,5 @@
 import { request } from './request';
-import type { Event, Font } from './types';
+import type { Event, EventRsvpCustomization, Font } from './types';
 
 export const eventsApi = {
   getEvents: () =>
@@ -11,6 +11,10 @@ export const eventsApi = {
     request<Event>('/events/', { method: 'POST', body: JSON.stringify(data) }),
   updateEvent: (id: number, data: Partial<Event>) =>
     request<Event>(`/events/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getEventRsvpCustomization: (id: number) =>
+    request<EventRsvpCustomization>(`/events/${id}/rsvp-page/`),
+  updateEventRsvpCustomization: (id: number, data: FormData) =>
+    request<EventRsvpCustomization>(`/events/${id}/rsvp-page/`, { method: 'PATCH', body: data }),
   deleteEvent: (id: number) =>
     request<void>(`/events/${id}/`, { method: 'DELETE' }),
 };

@@ -11,3 +11,4 @@ redis>=5.0.0
 django-celery-results>=2.5.0
 django-celery-beat>=2.6.0
 zipstream-ng>=1.7.0
+dnspython>=2.6

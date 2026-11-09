@@ -251,6 +251,8 @@ export interface Event {
   rsvp_card_color: string;
   rsvp_text_color: string;
   rsvp_background_image: string | null;
+  rsvp_hero_image: string | null;
+  rsvp_logo: string | null;
   design_template: string | null;
   qr_zone_x: number | null;
   qr_zone_y: number | null;
@@ -309,6 +311,21 @@ export interface Event {
   created_at: string;
 }
 
+/** The restricted, publishable RSVP appearance edited by organization owners/admins. */
+export interface EventRsvpCustomization {
+  id: number;
+  name: string;
+  rsvp_message: string;
+  color_of_day: string;
+  rsvp_primary_color: string;
+  rsvp_background_color: string;
+  rsvp_card_color: string;
+  rsvp_text_color: string;
+  rsvp_background_image: string | null;
+  rsvp_hero_image: string | null;
+  rsvp_logo: string | null;
+}
+
 export interface Font {
   id: number;
   name: string;
@@ -345,6 +362,13 @@ export interface WhatsAppTemplate {
   has_header_image: boolean;
   is_active: boolean;
   created_at: string;
+  /**
+   * Event whose schedule the location placeholders were numbered against.
+   * Display only — it never restricts which events the template may be sent for.
+   */
+  built_for_event?: number | null;
+  built_for_event_name?: string | null;
+  built_for_locations?: string[];
 }
 
 export type RsvpWorkflowStatus = 'draft' | 'active' | 'paused' | 'completed';
@@ -450,6 +474,8 @@ export interface PaginatedRsvpRecipients {
 }
 
 export interface PublicRsvpDetails {
+  /** Present when the page is served from the organization's own domain. */
+  organization_name?: string;
   /** Questions the planner configured for this event. */
   requirements: GuestRequirementField[];
   guest_name: string;
@@ -463,6 +489,8 @@ export interface PublicRsvpDetails {
   rsvp_card_color: string;
   rsvp_text_color: string;
   rsvp_background_image: string | null;
+  rsvp_hero_image: string | null;
+  rsvp_logo: string | null;
   collect_aso_ebi: boolean;
   allow_plus_one: boolean;
   /** Resolved organiser wording, already defaulted server-side. */
@@ -826,4 +854,34 @@ export interface MessagingSettingsAuditEntry {
   new_value: string
   changed_by: string
   changed_at: string
+}
+
+export type OrganizationDomainType = 'platform_subdomain' | 'custom_subdomain' | 'apex_domain'
+export type OrganizationDomainStatus = 'pending' | 'verified' | 'active' | 'failed'
+
+export interface OrganizationDomainDnsRecord {
+  type: 'TXT' | 'CNAME' | 'A' | 'ALIAS'
+  name: string
+  value: string
+  purpose: string
+}
+
+/** A hostname that serves the organization's public pages (RSVP first). */
+export interface OrganizationDomain {
+  id: number
+  hostname: string
+  type: OrganizationDomainType
+  type_display: string
+  status: OrganizationDomainStatus
+  status_display: string
+  /** Guest links are generated on the primary domain. */
+  is_primary: boolean
+  url: string
+  /** Records still to be added at the DNS provider; empty for platform subdomains. */
+  dns_records: OrganizationDomainDnsRecord[]
+  verified_at: string | null
+  activated_at: string | null
+  last_checked_at: string | null
+  last_check_message: string
+  created_at: string
 }

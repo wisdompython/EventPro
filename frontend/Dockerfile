@@ -12,6 +12,9 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Hosts that serve the admin app; every other host is an organization domain.
+ARG NEXT_PUBLIC_APP_HOSTNAMES
+ENV NEXT_PUBLIC_APP_HOSTNAMES=$NEXT_PUBLIC_APP_HOSTNAMES
 RUN npm run build
 
 # ── Stage 3: runner ───────────────────────────────────────────────────────────

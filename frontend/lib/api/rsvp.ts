@@ -95,35 +95,52 @@ export const rsvpApi = {
     ),
   getPublicRsvp: (token: string) =>
     request<PublicRsvpDetails>(`/rsvp/respond/${token}/`),
-  submitPublicRsvp: (
-    token: string,
-    answer: 'yes' | 'no',
-    asoEbiRequested = false,
-    asoEbiQuantity = 0,
-    plusOneAttending = false,
-    plusOneFullName = '',
-    plusOnePhoneNumber = '',
-    celebrantName = '',
-    requirements: Record<string, unknown> = {},
-  ) =>
-    request<{
-      accepted: boolean
-      already_responded?: boolean
-      response_status: RsvpResponseStatus
-      pass_queued?: boolean
-    }>(`/rsvp/respond/${token}/`, {
+  submitPublicRsvp: (token: string, ...answer: PublicRsvpAnswerArgs) =>
+    request<PublicRsvpSubmitResult>(`/rsvp/respond/${token}/`, {
       method: 'POST',
-      body: JSON.stringify({
-        answer,
-        aso_ebi_requested: answer === 'yes' && asoEbiRequested,
-        aso_ebi_quantity: answer === 'yes' && asoEbiRequested ? asoEbiQuantity : 0,
-        plus_one_attending: answer === 'yes' && plusOneAttending,
-        plus_one_full_name: answer === 'yes' && plusOneAttending ? plusOneFullName : '',
-        plus_one_phone_number: answer === 'yes' && plusOneAttending ? plusOnePhoneNumber : '',
-        celebrant_name: answer === 'yes' ? celebrantName : '',
-        // A decline is not the moment to enforce meal choices, so answers are
-        // only sent with a yes.
-        requirements: answer === 'yes' ? requirements : {},
-      }),
+      body: JSON.stringify(publicRsvpBody(...answer)),
     }),
+}
+
+export type PublicRsvpSubmitResult = {
+  accepted: boolean
+  already_responded?: boolean
+  response_status: RsvpResponseStatus
+  pass_queued?: boolean
+}
+
+export type PublicRsvpAnswerArgs = [
+  answer: 'yes' | 'no',
+  asoEbiRequested?: boolean,
+  asoEbiQuantity?: number,
+  plusOneAttending?: boolean,
+  plusOneFullName?: string,
+  plusOnePhoneNumber?: string,
+  celebrantName?: string,
+  requirements?: Record<string, unknown>,
+]
+
+/** The RSVP POST body, shared by the app-domain and organization-domain pages. */
+export function publicRsvpBody(
+  answer: 'yes' | 'no',
+  asoEbiRequested = false,
+  asoEbiQuantity = 0,
+  plusOneAttending = false,
+  plusOneFullName = '',
+  plusOnePhoneNumber = '',
+  celebrantName = '',
+  requirements: Record<string, unknown> = {},
+) {
+  return {
+    answer,
+    aso_ebi_requested: answer === 'yes' && asoEbiRequested,
+    aso_ebi_quantity: answer === 'yes' && asoEbiRequested ? asoEbiQuantity : 0,
+    plus_one_attending: answer === 'yes' && plusOneAttending,
+    plus_one_full_name: answer === 'yes' && plusOneAttending ? plusOneFullName : '',
+    plus_one_phone_number: answer === 'yes' && plusOneAttending ? plusOnePhoneNumber : '',
+    celebrant_name: answer === 'yes' ? celebrantName : '',
+    // A decline is not the moment to enforce meal choices, so answers are
+    // only sent with a yes.
+    requirements: answer === 'yes' ? requirements : {},
+  }
 }

@@ -1,6 +1,7 @@
 import secrets
 import uuid
 from django.db import models
+from django.utils.text import slugify
 from accounts.models import get_default_organization_id
 
 
@@ -35,6 +36,22 @@ class Font(models.Model):
         return self.name
 
 
+def unique_event_slug(organization_id, name, *, exclude_pk=None, queryset=None):
+    """Return a slug for ``name`` that is unused inside one organization."""
+    if queryset is None:
+        queryset = Event.objects.all()
+    taken = queryset.filter(organization_id=organization_id)
+    if exclude_pk is not None:
+        taken = taken.exclude(pk=exclude_pk)
+    base = slugify(name)[:72].strip('-') or 'event'
+    candidate = base
+    suffix = 2
+    while taken.filter(slug=candidate).exists():
+        candidate = f'{base}-{suffix}'
+        suffix += 1
+    return candidate
+
+
 class Event(models.Model):
     organization = models.ForeignKey(
         'accounts.Organization',
@@ -43,6 +60,10 @@ class Event(models.Model):
         default=get_default_organization_id,
     )
     name = models.CharField(max_length=255)
+    # Stable public address beneath the organization's domain, e.g.
+    # acme.com/rsvp/<slug>. Generated once from the name and never rewritten
+    # on rename, so links that were already sent keep working.
+    slug = models.SlugField(max_length=80, blank=True)
     date = models.DateTimeField()
     venue = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
@@ -80,6 +101,18 @@ class Event(models.Model):
         blank=True,
         null=True,
         help_text='Optional full-page background image for the public RSVP page.',
+    )
+    rsvp_hero_image = models.ImageField(
+        upload_to='rsvp_heroes/',
+        blank=True,
+        null=True,
+        help_text='Optional shared cover image for the public RSVP page.',
+    )
+    rsvp_logo = models.ImageField(
+        upload_to='rsvp_logos/',
+        blank=True,
+        null=True,
+        help_text='Optional logo shown in the public RSVP page header.',
     )
     # Admins upload one design per event; all guest passes are rendered on top of it
     design_template = models.ImageField(upload_to='design_templates/', blank=True, null=True)
@@ -190,8 +223,21 @@ class Event(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organization', 'slug'],
+                name='unique_event_slug_per_organization',
+            ),
+        ]
+
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = unique_event_slug(self.organization_id, self.name, exclude_pk=self.pk)
+        super().save(*args, **kwargs)
 
 
     @property
@@ -633,6 +679,17 @@ class WhatsAppTemplate(models.Model):
     # Ordered list of variable keys to pass as body params, e.g. ["guest_name", "event_name", "event_date"]
     body_params  = models.JSONField(default=list, blank=True, help_text="Ordered list of variable keys for body params")
     has_header_image = models.BooleanField(default=False, help_text="Template has a header image (pass image will be sent)")
+    # Which event's schedule this template's location placeholders were written
+    # against. Display only — it never restricts which events the template may
+    # be sent for, it just tells the next person what Location 1 meant when the
+    # numbering was chosen.
+    built_for_event = models.ForeignKey(
+        'Event',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='templates_built_for',
+        help_text='Event whose locations this template was numbered against.',
+    )
     is_active    = models.BooleanField(default=True)
     created_at   = models.DateTimeField(auto_now_add=True)
 

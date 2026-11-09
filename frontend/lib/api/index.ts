@@ -8,6 +8,8 @@ import { requirementsApi } from './requirements';
 import { seatingApi } from './seating';
 import { preferencesApi } from './preferences';
 import { messagingSettingsApi } from './messagingSettings';
+import { domainsApi } from './domains';
+import { publicSiteApi } from './publicSite';
 
 export const api = {
   ...authApi,
@@ -21,11 +23,13 @@ export const api = {
   ...seatingApi,
   ...preferencesApi,
   ...messagingSettingsApi,
+  ...domainsApi,
+  ...publicSiteApi,
 };
 
 export type {
   EventReminder, WhatsAppTemplate, TemplateCategory, Guest, CheckInGuest, GuestList, GuestListStats,
-  Event, EventLocation, CreateGuestPayload, RsvpWorkflow, RsvpWorkflowStatus, RsvpStats, RsvpRecipient,
+  Event, EventLocation, EventRsvpCustomization, CreateGuestPayload, RsvpWorkflow, RsvpWorkflowStatus, RsvpStats, RsvpRecipient,
   RsvpRecipientSegment, RsvpResponseStatus, RsvpInvitationStatus, RsvpPassStatus,
   RsvpRecipientOrdering,
   PaginatedRsvpRecipients, PublicRsvpDetails,
@@ -36,4 +40,5 @@ export type {
   PreferenceSeatingGuest, PreferenceSeatingTable,
   MessagingSettingsPayload, MessagingSettingsField, MessagingSettingsFieldName,
   MessagingSettingsUpdate, MessagingSettingsAuditEntry, MessagingSettingsValue,
+  OrganizationDomain, OrganizationDomainDnsRecord, OrganizationDomainStatus, OrganizationDomainType,
 } from './types';

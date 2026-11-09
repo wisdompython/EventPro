@@ -23,8 +23,14 @@ export const remindersApi = {
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''
     return request<{ count: number; next: string | null; previous: string | null; results: WhatsAppTemplate[] }>(`/whatsapp-templates/${qs}`)
   },
-  getAvailableTemplateVars: () =>
-    request<{ key: string; label: string }[]>('/whatsapp-templates/available-vars/'),
+  getAvailableTemplateVars: (eventId?: number | null) =>
+    request<{ key: string; label: string }[]>(
+      // With an event, location slots are labelled with that event's own stop
+      // names ("Church - venue") instead of positional ones ("Location 1 venue").
+      eventId
+        ? `/whatsapp-templates/available-vars/?event=${eventId}`
+        : '/whatsapp-templates/available-vars/',
+    ),
   createWhatsAppTemplate: (data: Omit<WhatsAppTemplate, 'id' | 'created_at' | 'category_name'>) =>
     request<WhatsAppTemplate>('/whatsapp-templates/', { method: 'POST', body: JSON.stringify(data) }),
   updateWhatsAppTemplate: (id: number, data: Partial<Omit<WhatsAppTemplate, 'id' | 'created_at' | 'category_name'>>) =>

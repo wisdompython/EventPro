@@ -3,6 +3,7 @@ from .event import (
     ALWAYS_REQUIRED,
     FontSerializer,
     EventSerializer,
+    EventRsvpCustomizationSerializer,
     _event_required_fields,
     _event_valid_ticket_values,
 )
@@ -14,6 +15,7 @@ __all__ = [
     'ALWAYS_REQUIRED',
     'FontSerializer',
     'EventSerializer',
+    'EventRsvpCustomizationSerializer',
     'GuestSerializer',
     'GuestListSerializer',
     'CheckInGuestSerializer',

@@ -91,6 +91,44 @@ AVAILABLE_VARS = [
     for key, label in WhatsAppTemplate.AVAILABLE_VARS
 ]
 
+#: Keys whose generic label ("Location 1 name") only becomes meaningful once we
+#: know which event the template is being written for.
+_LOCATION_KEY_PARTS = ('name', 'venue', 'time')
+_LOCATION_PART_LABELS = {'name': 'name', 'venue': 'venue', 'time': 'time'}
+
+
+def available_vars_for_event(event=None):
+    """The variable list a template builder shows, named for a real event.
+
+    Without an event these are positional slots — "Location 1 name" — which
+    tells the person writing the template nothing: whether slot 1 is the church
+    or the reception depends on the order set on whichever event it is sent
+    for. Given an event, each slot is relabelled with that event's own stop
+    ("Church - name"), and slots the event has no stop for are dropped, so a
+    placeholder can never be mapped to a location that does not exist.
+    """
+    if event is None:
+        return AVAILABLE_VARS
+
+    locations = list(event.locations.all()[:WhatsAppTemplate.MAX_TEMPLATE_LOCATIONS])
+    resolved = []
+    for entry in AVAILABLE_VARS:
+        key = entry['key']
+        if not key.startswith('location_'):
+            resolved.append(entry)
+            continue
+        # location_<n>_<part>
+        _, index_text, part = key.split('_', 2)
+        index = int(index_text) - 1
+        if index >= len(locations) or part not in _LOCATION_KEY_PARTS:
+            continue
+        stop_name = locations[index].name or f'Location {index + 1}'
+        resolved.append({
+            'key': key,
+            'label': f'{stop_name} - {_LOCATION_PART_LABELS[part]}',
+        })
+    return resolved
+
 
 class TemplateCategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -116,12 +154,40 @@ class TemplateCategorySerializer(serializers.ModelSerializer):
 
 class WhatsAppTemplateSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
+    built_for_event_name = serializers.CharField(source='built_for_event.name', read_only=True)
+    # The stop names this template's location placeholders were numbered
+    # against, so the library can show "1 = Church, 2 = Reception" rather than
+    # leaving the next person to guess.
+    built_for_locations = serializers.SerializerMethodField()
 
     class Meta:
         model = WhatsAppTemplate
         fields = ['id', 'name', 'display_name', 'description', 'category', 'category_name',
-                  'body_text', 'body_params', 'has_header_image', 'is_active', 'created_at']
-        read_only_fields = ['id', 'created_at', 'category_name']
+                  'body_text', 'body_params', 'has_header_image', 'is_active', 'created_at',
+                  'built_for_event', 'built_for_event_name', 'built_for_locations']
+        read_only_fields = ['id', 'created_at', 'category_name', 'built_for_event_name',
+                            'built_for_locations']
+
+    def get_built_for_locations(self, obj):
+        if obj.built_for_event_id is None:
+            return []
+        return [
+            location.name
+            for location in obj.built_for_event.locations.all()[
+                :WhatsAppTemplate.MAX_TEMPLATE_LOCATIONS
+            ]
+        ]
+
+    def validate_built_for_event(self, value):
+        if value is None:
+            return value
+        request = self.context.get('request')
+        if request is None:
+            return value
+        organization = get_request_organization(request, required=True)
+        if value.organization_id != organization.id:
+            raise serializers.ValidationError('Event not found.')
+        return value
 
     def validate_category(self, value):
         if value is None:
@@ -154,7 +220,29 @@ class AvailableVarsView(APIView):
     permission_classes = [IsEventManagerOrAbove]
 
     def get(self, request):
-        return Response(AVAILABLE_VARS)
+        """Variables a template may map, optionally named for one event.
+
+        `?event=<id>` is scoped to the caller's organization, so the picker
+        cannot be used to read another tenant's schedule.
+        """
+        event = None
+        event_id = request.query_params.get('event')
+        if event_id:
+            from ..models import Event
+
+            organization = get_request_organization(request, required=True)
+            event = (
+                Event.objects
+                .filter(pk=event_id, organization=organization)
+                .prefetch_related('locations')
+                .first()
+            )
+            if event is None:
+                return Response(
+                    {'detail': 'Event not found.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        return Response(available_vars_for_event(event))
 
 
 class TemplateCategoryViewSet(viewsets.ModelViewSet):
@@ -178,7 +266,9 @@ class WhatsAppTemplateViewSet(viewsets.ModelViewSet):
         organization = get_request_organization(self.request, required=True)
         qs = WhatsAppTemplate.objects.filter(
             organization=organization,
-        ).select_related('category')
+        ).select_related('category', 'built_for_event').prefetch_related(
+            'built_for_event__locations',
+        )
         if self.request.query_params.get('active_only') == '1':
             qs = qs.filter(is_active=True)
         if cat := self.request.query_params.get('category'):

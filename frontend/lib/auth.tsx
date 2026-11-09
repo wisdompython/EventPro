@@ -5,6 +5,7 @@ import {
 } from 'react'
 import { useRouter } from 'next/navigation'
 import { api, AuthUser, SignupPayload, UserRole } from './api'
+import { isAppHost } from './siteHost'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -39,6 +40,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // On mount, try to restore session from the backend
   useEffect(() => {
+    // Organization domains serve public pages only; sessions live on the app domain.
+    if (!isAppHost(window.location.host)) {
+      setLoading(false)
+      return
+    }
     api.me()
       .then(setUser)
       .catch(() => setUser(null))

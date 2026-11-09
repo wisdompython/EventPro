@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'accounts',
     'guests',
     'rsvp',
+    'public_sites',
     # Reads across the others; nothing imports it.
     'platform_ops',
 ]

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { api, WhatsAppTemplate, TemplateCategory } from '@/lib/api'
+import { api, WhatsAppTemplate, TemplateCategory, Event } from '@/lib/api'
 import { useRequireAuth } from '@/lib/auth'
 import { FormSectionHeader } from '@/components/ui/FormSectionHeader'
 import './message-library.css'
@@ -30,11 +30,13 @@ type FormState = {
   body_text: string
   body_params: string[]
   has_header_image: boolean
+  built_for_event: number | null
 }
 
 const EMPTY_FORM: FormState = {
   name: '', display_name: '', description: '', category: null,
   body_text: '', body_params: [], has_header_image: false,
+  built_for_event: null,
 }
 
 function resolvePreview(bodyText: string, bodyParams: string[]): string {
@@ -91,12 +93,13 @@ function PreviewBubble({ bodyText, bodyParams, hasHeaderImage }: {
 }
 
 function TemplateForm({
-  form, setForm, categories, availableVars, error, submitting, submitLabel, onSubmit, onCancel, isNew,
+  form, setForm, categories, availableVars, events, error, submitting, submitLabel, onSubmit, onCancel, isNew,
 }: {
   form: FormState
   setForm: React.Dispatch<React.SetStateAction<FormState>>
   categories: TemplateCategory[]
   availableVars: { key: string; label: string }[]
+  events: Event[]
   error: string
   submitting: boolean
   submitLabel: string
@@ -260,6 +263,28 @@ function TemplateForm({
             </span>
           </div>
         ))}
+        <div className="message-location-scope">
+          <label htmlFor="built-for-event">Which event are you writing this for?</label>
+          <select
+            id="built-for-event"
+            value={form.built_for_event ?? ''}
+            onChange={(e) => setForm((f) => ({
+              ...f,
+              built_for_event: e.target.value ? Number(e.target.value) : null,
+            }))}
+          >
+            <option value="">Any event — use general field names</option>
+            {events.map((event) => (
+              <option key={event.id} value={event.id}>{event.name}</option>
+            ))}
+          </select>
+          <small>
+            {form.built_for_event
+              ? 'Location fields below are named after this event’s own stops, so you can see exactly which one you are adding.'
+              : 'Pick an event and the location fields below will show its real stops — “Church”, “Reception” — instead of numbers.'}
+          </small>
+        </div>
+
         {availableVars.length > 0 && (
           <div className="message-variable-options">
             <p>Add a guest or event field</p>
@@ -306,6 +331,7 @@ export default function TemplatesPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [categories, setCategories] = useState<TemplateCategory[]>([])
   const [availableVars, setAvailableVars] = useState<{ key: string; label: string }[]>([])
+  const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<number | 'new' | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -339,10 +365,24 @@ export default function TemplatesPage() {
   }, [page, categoryFilter, debouncedSearch])
 
   useEffect(() => {
-    Promise.all([api.getTemplateCategories(), api.getAvailableTemplateVars()])
-      .then(([cats, vars]) => { setCategories(cats); setAvailableVars(vars) })
+    Promise.all([api.getTemplateCategories(), api.getEvents()])
+      .then(([cats, evs]) => {
+        setCategories(cats)
+        setEvents(evs)
+      })
       .catch(console.error)
   }, [])
+
+  // Re-fetch whenever the chosen event changes: the location fields are
+  // labelled with that event's own stop names, and an event with fewer stops
+  // offers fewer slots.
+  useEffect(() => {
+    let active = true
+    api.getAvailableTemplateVars(form.built_for_event)
+      .then((vars) => { if (active) setAvailableVars(vars) })
+      .catch(console.error)
+    return () => { active = false }
+  }, [form.built_for_event])
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 3000) }
 
@@ -366,6 +406,7 @@ export default function TemplatesPage() {
       name: t.name, display_name: t.display_name || '', description: t.description || '',
       category: t.category, body_text: t.body_text || '',
       body_params: t.body_params || [], has_header_image: t.has_header_image,
+      built_for_event: t.built_for_event ?? null,
     })
     setFormError('')
     revealEditor()
@@ -553,6 +594,15 @@ export default function TemplatesPage() {
                             <small>{template.has_header_image ? 'Image header' : 'Text only'}</small>
                             <small>{template.body_params?.length || 0} variable{template.body_params?.length === 1 ? '' : 's'}</small>
                           </span>
+                          {template.built_for_locations && template.built_for_locations.length > 0 && (
+                            // What this template's location numbering meant when
+                            // it was written, so the next person need not guess.
+                            <span className="message-template-card__builtfor">
+                              {template.built_for_locations
+                                .map((name, index) => `${index + 1} = ${name}`)
+                                .join(' · ')}
+                            </span>
+                          )}
                         </span>
                       </button>
                       <footer className="message-template-card__footer">
@@ -602,7 +652,7 @@ export default function TemplatesPage() {
             <div className="message-editor-panel__body">
               <TemplateForm
                 form={form} setForm={setForm} categories={categories}
-                availableVars={availableVars} error={formError} submitting={submitting}
+                availableVars={availableVars} events={events} error={formError} submitting={submitting}
                 submitLabel={selectedId === 'new' ? 'Add Template' : 'Save Changes'}
                 isNew={selectedId === 'new'}
                 onSubmit={handleSubmit} onCancel={closePanel}

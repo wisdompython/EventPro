@@ -763,10 +763,17 @@ class PublicRsvpResponseView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'public_rsvp'
 
+    def scope_recipients(self, recipients):
+        """Narrow the lookup. The app-domain route accepts any valid code."""
+        return recipients
+
+    def media_url(self, request, field):
+        return request.build_absolute_uri(field.url)
+
     def get_recipient(self, identifier):
-        recipients = RsvpRecipient.objects.select_related(
+        recipients = self.scope_recipients(RsvpRecipient.objects.select_related(
             'workflow__event', 'guest', 'guest__plus_one_of', 'guest__named_plus_one',
-        )
+        ))
         recipient = recipients.filter(
             Q(public_code=identifier) | Q(legacy_public_code=identifier)
         ).first()
@@ -797,8 +804,16 @@ class PublicRsvpResponseView(APIView):
             'rsvp_card_color': workflow.event.rsvp_card_color,
             'rsvp_text_color': workflow.event.rsvp_text_color,
             'rsvp_background_image': (
-                request.build_absolute_uri(workflow.event.rsvp_background_image.url)
+                self.media_url(request, workflow.event.rsvp_background_image)
                 if workflow.event.rsvp_background_image else None
+            ),
+            'rsvp_hero_image': (
+                self.media_url(request, workflow.event.rsvp_hero_image)
+                if workflow.event.rsvp_hero_image else None
+            ),
+            'rsvp_logo': (
+                self.media_url(request, workflow.event.rsvp_logo)
+                if workflow.event.rsvp_logo else None
             ),
             'collect_aso_ebi': workflow.event.collect_aso_ebi,
             'allow_plus_one': (
@@ -828,7 +843,7 @@ class PublicRsvpResponseView(APIView):
             ),
             'celebrant_name': recipient.guest.celebrant_name,
             'invitation_image': (
-                request.build_absolute_uri(recipient.invitation_image.url)
+                self.media_url(request, recipient.invitation_image)
                 if recipient.invitation_image else None
             ),
             'response_deadline': workflow.response_deadline,

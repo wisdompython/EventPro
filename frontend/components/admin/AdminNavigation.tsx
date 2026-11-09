@@ -1,6 +1,6 @@
 import type { UserRole } from '@/lib/api'
 
-export type AdminIconName = 'clipboard' | 'pulse' | 'calendar' | 'guests' | 'scan' | 'rsvp' | 'message' | 'bell' | 'design' | 'team' | 'settings' | 'queue' | 'docs' | 'upload' | 'seating'
+export type AdminIconName = 'clipboard' | 'pulse' | 'calendar' | 'guests' | 'scan' | 'rsvp' | 'message' | 'bell' | 'design' | 'team' | 'settings' | 'queue' | 'docs' | 'upload' | 'seating' | 'globe'
 
 export interface AdminNavItem {
   href: string
@@ -26,12 +26,14 @@ export const ADMIN_NAV: Array<{ label: string; items: AdminNavItem[] }> = [
     { href: '/admin/follow-ups', label: 'Follow-ups', icon: 'bell', minRole: 'check_in_staff', tourId: 'nav-reminders' },
   ]},
   { label: 'Creative studio', items: [
+    { href: '/admin/rsvp-customization', label: 'RSVP customization', icon: 'design', minRole: 'super_admin' },
     { href: '/admin/pass-studio', label: 'Pass studio', icon: 'design', minRole: 'event_manager', tourId: 'nav-fonts' },
     { href: '/admin/message-library', label: 'Message library', icon: 'message', minRole: 'event_manager', tourId: 'nav-templates' },
     { href: '/admin/list-import', label: 'List import', icon: 'upload', minRole: 'event_manager' },
   ]},
   { label: 'Company', items: [
     { href: '/admin/company-profile', label: 'Company profile', icon: 'settings', minRole: 'super_admin' },
+    { href: '/admin/domains', label: 'Domains', icon: 'globe', minRole: 'super_admin' },
     { href: '/admin/settings', label: 'Messaging settings', icon: 'settings', minRole: 'super_admin' },
     { href: '/admin/crew-access', label: 'Crew access', icon: 'team', minRole: 'super_admin', tourId: 'nav-team' },
     { href: '/admin/playbook', label: 'Playbook', icon: 'docs', minRole: 'check_in_staff' },
@@ -55,6 +57,7 @@ export function NavIcon({ name, size = 18 }: { name: AdminIconName; size?: numbe
     case 'queue': return <svg {...common}><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="11" cy="18" r="2" fill="currentColor" stroke="none"/></svg>
     case 'seating': return <svg {...common}><circle cx="12" cy="12" r="4"/><circle cx="12" cy="4.2" r="1.5"/><circle cx="19.8" cy="12" r="1.5"/><circle cx="12" cy="19.8" r="1.5"/><circle cx="4.2" cy="12" r="1.5"/><circle cx="17.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="17.5" r="1.5"/><circle cx="6.5" cy="17.5" r="1.5"/><circle cx="6.5" cy="6.5" r="1.5"/></svg>
     case 'clipboard': return <svg {...common}><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><path d="M8 6H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-2"/><path d="M9 12h6M9 16h4"/></svg>
+    case 'globe': return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
     case 'upload': return <svg {...common}><path d="M12 16V4m0 0L7 9m5-5 5 5M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
     default: return <svg {...common}><path d="M5 3h11l3 3v15H5z"/><path d="M9 11h6M9 15h6"/></svg>
   }

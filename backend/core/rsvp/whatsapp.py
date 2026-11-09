@@ -22,7 +22,14 @@ def build_callback_data(recipient, answer: str) -> str:
 
 
 def build_rsvp_url(recipient) -> str:
-    event_slug = slugify(recipient.workflow.event.name)[:48] or 'event'
+    """The guest's RSVP link, on the organization's primary domain when it has one."""
+    from public_sites.services import build_event_rsvp_url
+
+    event = recipient.workflow.event
+    branded = build_event_rsvp_url(event, recipient.public_code)
+    if branded:
+        return branded
+    event_slug = event.slug or slugify(event.name)[:48] or 'event'
     guest_slug = slugify(recipient.guest.full_name)[:40] or 'guest'
     return (
         f"{settings.SITE_URL.rstrip('/')}/{event_slug}/rsvp/"

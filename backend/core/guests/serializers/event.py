@@ -15,6 +15,15 @@ CONFIGURABLE_FIELDS = ['full_name', 'phone_number', 'email', 'table_number', 'se
 ALWAYS_REQUIRED = {'full_name'}
 
 
+def validate_rsvp_asset(value, label):
+    if value.size > 8 * 1024 * 1024:
+        raise serializers.ValidationError(f'The RSVP {label} must be 8 MB or smaller.')
+    content_type = getattr(value, 'content_type', '')
+    if content_type and content_type not in {'image/jpeg', 'image/png', 'image/webp'}:
+        raise serializers.ValidationError(f'Upload a PNG, JPEG, or WebP {label}.')
+    return value
+
+
 class EventLocationSerializer(serializers.ModelSerializer):
     """One stop in an event's schedule, as sent to and from the client."""
 
@@ -214,10 +223,10 @@ class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = (
-            'id', 'name', 'date', 'venue', 'description', 'rsvp_message', 'color_of_day',
+            'id', 'name', 'slug', 'date', 'venue', 'description', 'rsvp_message', 'color_of_day',
             'locations', 'locations_setup',
             'rsvp_primary_color', 'rsvp_background_color', 'rsvp_card_color',
-            'rsvp_text_color', 'rsvp_background_image',
+            'rsvp_text_color', 'rsvp_background_image', 'rsvp_hero_image', 'rsvp_logo',
             'design_template',
             'qr_zone_x', 'qr_zone_y', 'qr_zone_w', 'qr_zone_h',
             'name_zone_x', 'name_zone_y', 'name_zone_w', 'name_zone_h',
@@ -238,7 +247,7 @@ class EventSerializer(serializers.ModelSerializer):
             'estimated_guest_count', 'aso_ebi_request_count', 'aso_ebi_quantity',
             'preferences_submitted_count', 'celebrant_breakdown', 'created_at',
         )
-        read_only_fields = ('id', 'created_at', 'name_font_name', 'whatsapp_template_name', 'plus_one_term', 'aso_ebi_term', 'aso_ebi_unit_term',)
+        read_only_fields = ('id', 'slug', 'created_at', 'name_font_name', 'whatsapp_template_name', 'plus_one_term', 'aso_ebi_term', 'aso_ebi_unit_term',)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -327,12 +336,13 @@ class EventSerializer(serializers.ModelSerializer):
         return attrs
 
     def validate_rsvp_background_image(self, value):
-        if value.size > 8 * 1024 * 1024:
-            raise serializers.ValidationError('The RSVP background must be 8 MB or smaller.')
-        content_type = getattr(value, 'content_type', '')
-        if content_type and content_type not in {'image/jpeg', 'image/png', 'image/webp'}:
-            raise serializers.ValidationError('Upload a PNG, JPEG, or WebP background image.')
-        return value
+        return validate_rsvp_asset(value, 'background')
+
+    def validate_rsvp_hero_image(self, value):
+        return validate_rsvp_asset(value, 'cover image')
+
+    def validate_rsvp_logo(self, value):
+        return validate_rsvp_asset(value, 'logo')
 
     def validate_locations_setup(self, value):
         """Validate the schedule an organiser built in the event form.
@@ -588,3 +598,58 @@ class EventSerializer(serializers.ModelSerializer):
                 cleaned.append(name)
                 seen.add(key)
         return cleaned
+
+
+class EventRsvpCustomizationSerializer(serializers.ModelSerializer):
+    """The deliberately small surface owners/admins can publish to RSVP guests."""
+
+    clear_rsvp_background_image = serializers.BooleanField(write_only=True, required=False, default=False)
+    clear_rsvp_hero_image = serializers.BooleanField(write_only=True, required=False, default=False)
+    clear_rsvp_logo = serializers.BooleanField(write_only=True, required=False, default=False)
+
+    class Meta:
+        model = Event
+        fields = (
+            'id', 'name', 'rsvp_message', 'color_of_day',
+            'rsvp_primary_color', 'rsvp_background_color', 'rsvp_card_color',
+            'rsvp_text_color', 'rsvp_background_image', 'rsvp_hero_image', 'rsvp_logo',
+            'clear_rsvp_background_image', 'clear_rsvp_hero_image', 'clear_rsvp_logo',
+        )
+        read_only_fields = ('id', 'name')
+
+    def validate(self, attrs):
+        for field in (
+            'rsvp_primary_color', 'rsvp_background_color',
+            'rsvp_card_color', 'rsvp_text_color',
+        ):
+            value = attrs.get(field, getattr(self.instance, field, '') if self.instance else '')
+            if value and (
+                len(value) != 7
+                or not value.startswith('#')
+                or any(char not in '0123456789abcdefABCDEF' for char in value[1:])
+            ):
+                raise serializers.ValidationError({
+                    field: 'Enter a six-digit hex colour such as #8a6f2b.',
+                })
+        return attrs
+
+    def validate_rsvp_background_image(self, value):
+        return validate_rsvp_asset(value, 'background')
+
+    def validate_rsvp_hero_image(self, value):
+        return validate_rsvp_asset(value, 'cover image')
+
+    def validate_rsvp_logo(self, value):
+        return validate_rsvp_asset(value, 'logo')
+
+    def update(self, instance, validated_data):
+        clear_background = validated_data.pop('clear_rsvp_background_image', False)
+        clear_hero = validated_data.pop('clear_rsvp_hero_image', False)
+        clear_logo = validated_data.pop('clear_rsvp_logo', False)
+        if clear_background:
+            instance.rsvp_background_image = None
+        if clear_hero:
+            instance.rsvp_hero_image = None
+        if clear_logo:
+            instance.rsvp_logo = None
+        return super().update(instance, validated_data)

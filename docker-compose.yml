@@ -54,6 +54,10 @@ services:
       CORS_ALLOWED_ORIGINS: http://localhost:3000
       CSRF_TRUSTED_ORIGINS: http://localhost:3000
       SITE_URL: http://localhost:3000
+      # Free platform subdomains: acme.localhost:3000 serves organization "acme".
+      PUBLIC_SITE_ROOT_DOMAIN: localhost
+      PUBLIC_SITE_SCHEME: http
+      PUBLIC_SITE_PORT: "3000"
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Africa/Lagos}
       MAILTRAP_SMTP_HOST: ${MAILTRAP_SMTP_HOST:-sandbox.smtp.mailtrap.io}
       MAILTRAP_SMTP_PORT: ${MAILTRAP_SMTP_PORT:-2525}
@@ -131,6 +135,9 @@ services:
     command: npm run dev:docker
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      # Organization-domain pages call the API server-side over the Compose network.
+      INTERNAL_API_URL: http://backend:8000/api
+      NEXT_PUBLIC_APP_HOSTNAMES: localhost,127.0.0.1
       NEXT_TELEMETRY_DISABLED: "1"
       WATCHPACK_POLLING: "true"
     volumes:
