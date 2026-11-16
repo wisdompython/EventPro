@@ -37,6 +37,9 @@
   --font-sans:    Aptos, 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-display: 'Trebuchet MS', Aptos, 'Segoe UI', sans-serif;
   --font-mono:    'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  /* Preserve the public site's typography inside admin RSVP previews. */
+  --font-public-sans: var(--font-sans);
+  --font-public-display: var(--font-display);
 }
 
 html {

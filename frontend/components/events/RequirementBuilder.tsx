@@ -218,11 +218,11 @@ export function RequirementBuilder({ eventId, collectionChannel }: Props) {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-semibold text-[var(--ink)]">{requirement.label}</span>
-                      <span className="rounded-full bg-[var(--chip)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+                      <span className="rounded-full bg-[var(--chip)] px-2 py-0.5 text-[12px] font-bold uppercase tracking-wider text-[var(--muted)]">
                         {KIND_LABEL[requirement.kind]}
                       </span>
                       {requirement.required && (
-                        <span className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider" style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
+                        <span className="rounded-full px-2 py-0.5 text-[12px] font-bold uppercase tracking-wider" style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
                           Required
                         </span>
                       )}
@@ -232,7 +232,7 @@ export function RequirementBuilder({ eventId, collectionChannel }: Props) {
                       {requirement.kind === 'quantity' && requirement.unit ? ` · in ${requirement.unit}` : ''}
                       {requirement.options.length ? ` · ${requirement.options.join(', ')}` : ''}
                     </p>
-                    <p className="mt-1 text-[11px] text-[var(--muted)]">
+                    <p className="mt-1 text-[12px] text-[var(--muted)]">
                       {requirement.response_count
                         ? `${requirement.response_count} answer${requirement.response_count === 1 ? '' : 's'} so far`
                         : 'No answers yet'}

@@ -154,7 +154,7 @@ export default function GlobalGuestSearchPage() {
         ) : (
           <table className="w-full text-[13px]">
             <thead className="sticky top-0 z-10">
-              <tr className="text-[10px] font-semibold uppercase tracking-[0.14em]"
+              <tr className="text-[12px] font-semibold uppercase tracking-[0.14em]"
                 style={{ background: 'var(--panel)', borderBottom: '1px solid var(--line)', color: 'var(--muted-2)' }}>
                 <th className="px-5 py-2.5 text-left">Guest</th>
                 <th className="px-5 py-2.5 text-left">Event</th>
@@ -172,7 +172,7 @@ export default function GlobalGuestSearchPage() {
                     style={{ borderBottom: '1px solid var(--line)' }}>
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2.5">
-                        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-bold"
                           style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
                           {initials(g.full_name)}
                         </div>
@@ -181,7 +181,7 @@ export default function GlobalGuestSearchPage() {
                             className="font-semibold hover:underline" style={{ color: 'var(--ink)' }}>
                             {g.full_name}
                           </Link>
-                          <p className="text-[11px] font-mono" style={{ color: 'var(--muted-2)' }}>
+                          <p className="text-[12px] font-mono" style={{ color: 'var(--muted-2)' }}>
                             G-{g.id.slice(-3).toUpperCase()}
                           </p>
                         </div>
@@ -192,13 +192,13 @@ export default function GlobalGuestSearchPage() {
                     </td>
                     <td className="px-5 py-3">
                       <p className="text-xs" style={{ color: 'var(--muted)' }}>{g.email || '—'}</p>
-                      <p className="text-[11px] font-mono" style={{ color: 'var(--muted-2)' }}>{g.phone_number || '—'}</p>
+                      <p className="text-[12px] font-mono" style={{ color: 'var(--muted-2)' }}>{g.phone_number || '—'}</p>
                     </td>
                     <td className="px-5 py-3 text-xs font-medium" style={{ color: 'var(--ink)' }}>
                       {g.ticket_type?.toUpperCase() || '—'}
                     </td>
                     <td className="px-5 py-3">
-                      <span className="px-2 py-0.5 text-[11px] font-bold tracking-[0.06em]"
+                      <span className="px-2 py-0.5 text-[12px] font-bold tracking-[0.06em]"
                         style={{
                           background: st ? 'var(--brand-soft)' : 'rgba(245,158,11,0.14)',
                           color: st ? 'var(--brand)' : 'var(--warn)',

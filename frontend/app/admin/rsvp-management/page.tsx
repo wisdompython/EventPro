@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 
 import { api, RsvpWorkflow, RsvpWorkflowStatus } from '@/lib/api'
+import { AdminLoadError } from '@/components/admin/AdminLoadError'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { useRequireAuth } from '@/lib/auth'
 
 const STATUS_LABEL: Record<RsvpWorkflowStatus, string> = {
   draft: 'Draft',
@@ -13,16 +16,22 @@ const STATUS_LABEL: Record<RsvpWorkflowStatus, string> = {
 }
 
 export default function RsvpWorkflowsPage() {
+  useRequireAuth('event_manager')
   const [workflows, setWorkflows] = useState<RsvpWorkflow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | RsvpWorkflowStatus>('all')
   const [deleting, setDeleting] = useState<number | null>(null)
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
-    api.getRsvpWorkflows().then(setWorkflows).catch(console.error).finally(() => setLoading(false))
-  }, [])
+    let cancelled = false
+    setLoading(true); setLoadError('')
+    api.getRsvpWorkflows().then((items) => { if (!cancelled) setWorkflows(items) }).catch(() => { if (!cancelled) setLoadError('Could not load RSVP setups. Please retry.') }).finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [reload])
 
   const filtered = useMemo(() => workflows.filter((workflow) => {
     const matchesSearch = workflow.event_name.toLowerCase().includes(search.trim().toLowerCase())
@@ -48,17 +57,8 @@ export default function RsvpWorkflowsPage() {
   }
 
   return (
-    <div className="px-6 py-6 lg:px-8 lg:py-7">
-      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--brand)' }}>Guest contact</p>
-          <h1 className="mt-1 text-xl font-bold" style={{ color: 'var(--ink)' }}>RSVP management</h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>Ask guests to confirm their attendance or availability before issuing passes.</p>
-        </div>
-        <Link href="/admin/rsvp-management/add" className="rounded-lg px-4 py-2 text-center text-sm font-semibold text-white transition hover:opacity-90" style={{ background: 'var(--brand)' }}>
-          + New RSVP setup
-        </Link>
-      </div>
+    <div className="admin-page">
+      <AdminPageHeader eyebrow="Guest contact" title="RSVP management" description="Ask guests to confirm their attendance or availability before issuing passes." actions={<Link href="/admin/rsvp-management/add" className="admin-primary-action">＋ New RSVP setup</Link>} />
 
       <div className="mb-5 rounded-[12px] px-4 py-3" style={{ border: '1px solid rgba(184,150,62,0.25)', background: 'var(--brand-soft)' }}>
         <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Standard event delivery remains unchanged</p>
@@ -67,8 +67,8 @@ export default function RsvpWorkflowsPage() {
 
       {workflows.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-2.5 rounded-[12px] px-4 py-3" style={{ border: '1px solid var(--line)', background: 'var(--panel)' }}>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search event…" className="min-w-[190px] flex-1 rounded-lg px-3 py-2 text-xs focus:outline-none" style={{ border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)' }} />
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'all' | RsvpWorkflowStatus)} className="rounded-lg px-3 py-2 text-xs font-semibold focus:outline-none" style={{ border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)' }}>
+          <input aria-label="Search RSVP setups by event" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search event…" className="min-w-0 flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none" style={{ border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)' }} />
+          <select aria-label="RSVP setup status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'all' | RsvpWorkflowStatus)} className="rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none" style={{ border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)' }}>
             <option value="all">All statuses</option>
             <option value="draft">Draft</option>
             <option value="active">Active</option>
@@ -78,12 +78,12 @@ export default function RsvpWorkflowsPage() {
         </div>
       )}
 
-      {error && <p className="mb-4 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>{error}</p>}
+      {error && <p role="alert" className="mb-4 rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>{error}</p>}
 
       <div className="overflow-hidden rounded-[12px]" style={{ border: '1px solid var(--line)', background: 'var(--panel)' }}>
         {loading ? (
           <div className="py-16 text-center text-sm" style={{ color: 'var(--muted)' }}>Loading workflows…</div>
-        ) : workflows.length === 0 ? (
+        ) : loadError ? <AdminLoadError message={loadError} onRetry={() => setReload((value) => value + 1)} /> : workflows.length === 0 ? (
           <div className="flex flex-col items-center px-5 py-16 text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full" style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
               <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
@@ -95,14 +95,31 @@ export default function RsvpWorkflowsPage() {
         ) : filtered.length === 0 ? (
           <div className="py-14 text-center text-sm" style={{ color: 'var(--muted)' }}>No workflows match these filters.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="md:hidden">
+            {filtered.map((workflow) => <article key={workflow.id} className="border-b border-[var(--line)] p-4">
+              <h2 className="font-semibold text-[var(--ink)]">{workflow.event_name}</h2>
+              <p className="mt-1 text-sm text-[var(--muted)]">{new Date(workflow.event_date).toLocaleDateString('en-GB')} · {STATUS_LABEL[workflow.status]}</p>
+              <dl className="my-4 grid grid-cols-2 gap-3 text-sm">
+                <div><dt className="text-[var(--muted)]">Responses</dt><dd>{workflow.stats.confirmed + workflow.stats.declined} / {workflow.stats.invited}</dd></div>
+                <div><dt className="text-[var(--muted)]">Confirmed</dt><dd>{workflow.stats.confirmed}</dd></div>
+                <div><dt className="text-[var(--muted)]">Passes sent</dt><dd>{workflow.stats.passes_sent}</dd></div>
+              </dl>
+              <div className="flex flex-wrap gap-2">
+                <Link href={`/admin/rsvp-management/${workflow.id}`} className="admin-primary-action">View responses</Link>
+                <Link href={`/admin/rsvp-management/add?workflow=${workflow.id}`} className="admin-secondary-action">Edit setup</Link>
+                <button type="button" aria-label={`Delete RSVP setup for ${workflow.event_name}`} disabled={deleting === workflow.id} onClick={() => deleteWorkflow(workflow)} className="admin-danger-action">{deleting === workflow.id ? 'Deleting…' : 'Delete'}</button>
+              </div>
+            </article>)}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[760px] text-sm">
               <thead><tr style={{ borderBottom: '1px solid var(--line)', color: 'var(--muted)' }}>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider">Event</th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider">Responses</th>
-                <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider">Confirmed</th>
-                <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider">Passes sent</th>
+                <th className="px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-wider">Event</th>
+                <th className="px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-wider">Status</th>
+                <th className="px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-wider">Responses</th>
+                <th className="px-4 py-3 text-right text-[12px] font-semibold uppercase tracking-wider">Confirmed</th>
+                <th className="px-4 py-3 text-right text-[12px] font-semibold uppercase tracking-wider">Passes sent</th>
                 <th className="px-4 py-3"></th>
               </tr></thead>
               <tbody>{filtered.map((workflow) => {
@@ -110,7 +127,7 @@ export default function RsvpWorkflowsPage() {
                 return (
                   <tr key={workflow.id} style={{ borderBottom: '1px solid var(--line)' }}>
                     <td className="px-4 py-4"><p className="font-semibold" style={{ color: 'var(--ink)' }}>{workflow.event_name}</p><p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>{new Date(workflow.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p></td>
-                    <td className="px-4 py-4"><span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: workflow.status === 'active' ? 'var(--success-bg)' : 'var(--brand-soft)', color: workflow.status === 'active' ? 'var(--success)' : 'var(--brand)' }}>{STATUS_LABEL[workflow.status]}</span></td>
+                    <td className="px-4 py-4"><span className="rounded-full px-2.5 py-1 text-[12px] font-semibold" style={{ background: workflow.status === 'active' ? 'var(--success-bg)' : 'var(--brand-soft)', color: workflow.status === 'active' ? 'var(--success)' : 'var(--brand)' }}>{STATUS_LABEL[workflow.status]}</span></td>
                     <td className="px-4 py-4"><div className="flex items-center justify-between gap-4 text-xs"><span>{responded} / {workflow.stats.invited}</span><span style={{ color: 'var(--muted)' }}>{workflow.stats.response_rate}%</span></div><div className="mt-2 h-1.5 min-w-[130px] overflow-hidden rounded-full" style={{ background: 'var(--line)' }}><div className="h-full rounded-full" style={{ width: `${workflow.stats.response_rate}%`, background: 'var(--brand)' }} /></div></td>
                     <td className="px-4 py-4 text-right font-semibold">{workflow.stats.confirmed}</td>
                     <td className="px-4 py-4 text-right">{workflow.stats.passes_sent}</td>
@@ -120,6 +137,7 @@ export default function RsvpWorkflowsPage() {
               })}</tbody>
             </table>
           </div>
+          </>
         )}
       </div>
     </div>

@@ -184,7 +184,7 @@ export function RemindersSection({ eventId }: Props) {
                 className="w-full px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
                 style={{ background: 'var(--chip)', border: '1px solid var(--line)', color: 'var(--ink)' }} />
             )}
-            <p className="mt-1 text-[11px]" style={{ color: 'var(--muted-2)' }}>
+            <p className="mt-1 text-[12px]" style={{ color: 'var(--muted-2)' }}>
               {selectedTemplate
                 ? selectedTemplate.has_header_image
                   ? 'This image-header template resends each guest’s event pass, including its QR code.'
@@ -220,16 +220,16 @@ export function RemindersSection({ eventId }: Props) {
                 <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
                   {hoursLabel(r.hours_before)}
                 </span>
-                <span className="px-2 py-0.5 text-[10px] font-semibold rounded"
+                <span className="px-2 py-0.5 text-[12px] font-semibold rounded"
                   style={{ background: r.is_active ? 'var(--brand-soft)' : 'var(--chip)', color: r.is_active ? 'var(--brand)' : 'var(--muted)' }}>
                   {r.is_active ? 'Active' : 'Paused'}
                 </span>
-                <span className="px-2 py-0.5 text-[10px] font-semibold rounded"
+                <span className="px-2 py-0.5 text-[12px] font-semibold rounded"
                   style={{ background: 'var(--chip)', color: 'var(--muted)' }}>
                   {r.includes_event_pass ? 'Pass + QR' : 'Message only'}
                 </span>
                 {r.logs_sent > 0 && (
-                  <span className="text-[11px]" style={{ color: 'var(--muted)' }}>
+                  <span className="text-[12px]" style={{ color: 'var(--muted)' }}>
                     {r.logs_sent} sent
                   </span>
                 )}
@@ -238,17 +238,17 @@ export function RemindersSection({ eventId }: Props) {
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <button onClick={() => handleSendNow(r)} disabled={sending === r.id}
-                className="px-3 py-1.5 text-[11px] font-semibold rounded-full transition disabled:opacity-50"
+                className="px-3 py-1.5 text-[12px] font-semibold rounded-full transition disabled:opacity-50"
                 style={{ border: '1px solid var(--brand)', color: 'var(--brand)' }}>
                 {sending === r.id ? 'Sending…' : 'Send now'}
               </button>
               <button onClick={() => handleToggle(r)}
-                className="px-3 py-1.5 text-[11px] font-semibold rounded-full transition"
+                className="px-3 py-1.5 text-[12px] font-semibold rounded-full transition"
                 style={{ border: '1px solid var(--line)', color: 'var(--muted)' }}>
                 {r.is_active ? 'Pause' : 'Resume'}
               </button>
               <button onClick={() => handleDelete(r.id)}
-                className="px-2 py-1.5 text-[11px] font-semibold rounded-full transition"
+                className="px-2 py-1.5 text-[12px] font-semibold rounded-full transition"
                 style={{ border: '1px solid rgba(239,68,68,0.3)', color: 'var(--danger)' }}>
                 ✕
               </button>

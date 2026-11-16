@@ -71,7 +71,7 @@ export function DownloadAssetsButton({ eventId, eventName }: Props) {
                 <p className="text-xs font-semibold" style={{ color: mode === opt.value ? 'var(--brand)' : 'var(--ink)' }}>
                   {opt.label}
                 </p>
-                <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted)' }}>{opt.desc}</p>
+                <p className="text-[12px] mt-0.5" style={{ color: 'var(--muted)' }}>{opt.desc}</p>
               </button>
             ))}
           </div>

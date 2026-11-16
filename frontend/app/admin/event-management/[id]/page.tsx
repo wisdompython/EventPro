@@ -82,9 +82,9 @@ export default function EventWorkspacePage({ params }: { params: Promise<{ id: s
       <header className="mt-4 flex flex-col gap-5 border-b border-[var(--line)] pb-6 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${event.is_ended ? 'bg-[var(--chip)] text-[var(--muted)]' : 'bg-emerald-500/10 text-emerald-700'}`}>{event.is_ended ? 'Ended' : 'Upcoming'}</span>
-            {event.rsvp_enabled && <span className="rounded-full bg-[var(--brand-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--brand)]">RSVP {workflow?.status || 'setup needed'}</span>}
-            {event.preferences_enabled && <span className="rounded-full bg-[var(--brand-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--brand)]">Preferences only</span>}
+            <span className={`rounded-full px-2.5 py-1 text-[12px] font-bold uppercase tracking-wider ${event.is_ended ? 'bg-[var(--chip)] text-[var(--muted)]' : 'bg-emerald-500/10 text-emerald-700'}`}>{event.is_ended ? 'Ended' : 'Upcoming'}</span>
+            {event.rsvp_enabled && <span className="rounded-full bg-[var(--brand-soft)] px-2.5 py-1 text-[12px] font-bold uppercase tracking-wider text-[var(--brand)]">RSVP {workflow?.status || 'setup needed'}</span>}
+            {event.preferences_enabled && <span className="rounded-full bg-[var(--brand-soft)] px-2.5 py-1 text-[12px] font-bold uppercase tracking-wider text-[var(--brand)]">Preferences only</span>}
           </div>
           <h1 className="mt-3 font-display text-3xl text-[var(--ink)] sm:text-4xl">{event.name}</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">{formatDate(event.date)}{event.venue ? ` · ${event.venue}` : ''}</p>
@@ -101,7 +101,7 @@ export default function EventWorkspacePage({ params }: { params: Promise<{ id: s
 
       <section className="mt-6">
         <div className="mb-3 flex items-end justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">Planning dashboard</p><h2 className="mt-1 text-xl font-bold text-[var(--ink)]">Expected attendance and preferences</h2></div></div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">{planningMetrics.map((metric) => <div key={metric.label} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">{metric.label}</p><p className="mt-2 text-3xl font-bold tabular-nums text-[var(--ink)]">{metric.value}</p><p className="mt-1 text-[11px] leading-4 text-[var(--muted)]">{metric.detail}</p></div>)}</div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">{planningMetrics.map((metric) => <div key={metric.label} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4"><p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">{metric.label}</p><p className="mt-2 text-3xl font-bold tabular-nums text-[var(--ink)]">{metric.value}</p><p className="mt-1 text-[12px] leading-4 text-[var(--muted)]">{metric.detail}</p></div>)}</div>
         {event.collect_celebrant && <div className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5"><h3 className="text-sm font-semibold text-[var(--ink)]">Guests by celebrant</h3>{event.celebrant_breakdown.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{event.celebrant_breakdown.map((item) => <div key={item.name} className="rounded-lg bg-[var(--bg)] p-4"><p className="font-semibold text-[var(--ink)]">{item.name}</p><p className="mt-1 text-xs text-[var(--muted)]">{item.guests} guest{item.guests === 1 ? '' : 's'} · {item.plus_ones} attending as {plusOneTerm.toLowerCase()}</p><p className="mt-2 text-lg font-bold text-[var(--brand)]">{item.estimated_guests} estimated</p></div>)}</div> : <p className="mt-3 text-sm text-[var(--muted)]">No celebrant preferences have been submitted yet.</p>}</div>}
       </section>
 

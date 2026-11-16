@@ -83,7 +83,7 @@ export function EventDetailsForm({ event, localDateValue, subtitle, step, showRs
             onChange={handleDateChange}
           />
           {dateError && (
-            <p className="mt-1 text-[11px]" style={{ color: 'var(--danger)' }}>{dateError}</p>
+            <p className="mt-1 text-xs" style={{ color: 'var(--danger)' }}>{dateError}</p>
           )}
           {!dateError && <p className="form-hint">Times are saved in West Africa Time (UTC+1) for scheduling and reminders.</p>}
         </div>
@@ -127,7 +127,7 @@ export function EventDetailsForm({ event, localDateValue, subtitle, step, showRs
                   ['rsvp_background_color', 'Background', event?.rsvp_background_color || '#f6f4ee'],
                   ['rsvp_card_color', 'Card', event?.rsvp_card_color || '#ffffff'],
                   ['rsvp_text_color', 'Text', event?.rsvp_text_color || '#23262e'],
-                ].map(([name, colourLabel, value]) => <label key={name} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3 text-xs font-semibold text-[var(--muted)]"><span>{colourLabel}</span><span className="mt-2 flex items-center gap-2"><input name={name} type="color" defaultValue={value} className="h-9 w-12 cursor-pointer rounded border-0 bg-transparent p-0"/><span className="font-mono text-[11px] text-[var(--ink)]">{value}</span></span></label>)}
+                ].map(([name, colourLabel, value]) => <label key={name} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3 text-xs font-semibold text-[var(--muted)]"><span>{colourLabel}</span><span className="mt-2 flex items-center gap-2"><input name={name} type="color" defaultValue={value} className="h-9 w-12 cursor-pointer rounded border-0 bg-transparent p-0"/><span className="font-mono text-[12px] text-[var(--ink)]">{value}</span></span></label>)}
               </div>
               <div className="mt-4">
                 <label className={label}>Page background image <span className="font-normal text-[var(--muted)]">(optional)</span></label>

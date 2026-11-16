@@ -116,28 +116,28 @@ function BulkSendModal({ guests, resend, totalCount, unsentCount, onConfirm, onC
           </p>
           {sample.length > 0 && (
             <div className="rounded-[10px] overflow-hidden" style={{ border: '1px solid var(--line)' }}>
-              <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider"
+              <p className="px-3 py-2 text-[12px] font-semibold uppercase tracking-wider"
                 style={{ background: 'var(--bg)', borderBottom: '1px solid var(--line)', color: 'var(--muted-2)' }}>
                 Sample recipients {targetCount > 5 ? `(first 5 of ${targetCount})` : ''}
               </p>
               {sample.map((g) => (
                 <div key={g.id} className="flex items-center gap-2.5 px-3 py-2"
                   style={{ borderBottom: '1px solid var(--line)' }}>
-                  <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                  <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-bold"
                     style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
                     {showInitials(g.full_name)}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold truncate" style={{ color: 'var(--ink)' }}>{g.full_name}</p>
-                    <p className="text-[10px] font-mono" style={{ color: 'var(--muted-2)' }}>{g.phone_number}</p>
+                    <p className="text-[12px] font-mono" style={{ color: 'var(--muted-2)' }}>{g.phone_number}</p>
                   </div>
                   {g.whatsapp_sent && (
-                    <span className="text-[10px]" style={{ color: 'var(--brand)' }}>Resend</span>
+                    <span className="text-[12px]" style={{ color: 'var(--brand)' }}>Resend</span>
                   )}
                 </div>
               ))}
               {targetCount > 5 && (
-                <p className="px-3 py-2 text-[11px]" style={{ color: 'var(--muted)' }}>
+                <p className="px-3 py-2 text-[12px]" style={{ color: 'var(--muted)' }}>
                   + {targetCount - 5} more…
                 </p>
               )}

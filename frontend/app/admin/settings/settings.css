@@ -2,16 +2,16 @@
    Each field carries its own help text, its recommended value and its limits,
    so an organiser never has to look elsewhere to know what a number does. */
 
-.ms-loading { padding: 40px 0; color: var(--muted); font-size: .82rem; }
+.ms-loading { padding: 40px 0; color: var(--muted); font-size: var(--admin-text-small); }
 
-.ms-banner { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 14px 4px 14px 4px; padding: 12px 15px; font-size: .76rem; font-weight: 640; line-height: 1.5; }
+.ms-banner { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 14px 4px 14px 4px; padding: 12px 15px; font-size: var(--admin-text-small); font-weight: 600; line-height: 1.5; }
 .ms-banner--success { border-color: rgba(14,143,107,.28); background: rgba(14,143,107,.08); color: var(--success); }
 .ms-banner--error { border-color: rgba(220,38,38,.28); background: rgba(220,38,38,.07); color: var(--danger); }
 
 .ms-card { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 20px 6px 20px 6px; background: var(--panel); padding: 24px 26px; box-shadow: 0 10px 28px rgba(35,29,55,.05); }
 .ms-card__head { padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-.ms-card__title { color: var(--ink); font-family: var(--font-display); font-size: 1.05rem; font-weight: 800; letter-spacing: -.035em; }
-.ms-card__blurb { max-width: 620px; margin-top: 7px; color: var(--muted); font-size: .75rem; line-height: 1.6; }
+.ms-card__title { color: var(--ink); font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; letter-spacing: -0.03em; }
+.ms-card__blurb { max-width: 620px; margin-top: 7px; color: var(--muted); font-size: var(--admin-text-small); line-height: 1.6; }
 
 .ms-fields { display: grid; gap: 22px; padding-top: 20px; }
 
@@ -19,54 +19,54 @@
 .ms-field--invalid { border-left-color: var(--danger); }
 
 .ms-field__head { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
-.ms-field__label { color: var(--ink); font-family: var(--font-display); font-size: .86rem; font-weight: 780; letter-spacing: -.015em; }
+.ms-field__label { color: var(--ink); font-family: var(--font-display); font-size: var(--admin-text-small); font-weight: 700; letter-spacing: -0.015em; }
 
-.ms-tag { border: 1px solid var(--line); border-radius: 999px; background: var(--bg); padding: 2px 9px; color: var(--muted-2); font-size: .58rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.ms-tag { border: 1px solid var(--line); border-radius: 999px; background: var(--bg); padding: 2px 9px; color: var(--muted-2); font-size: var(--admin-text-caption); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 .ms-tag--custom { border-color: rgba(103,87,217,.3); background: var(--brand-soft); color: var(--brand); }
 
-.ms-field__help { max-width: 660px; margin-top: 6px; color: var(--muted); font-size: .74rem; line-height: 1.65; }
+.ms-field__help { max-width: 660px; margin-top: 6px; color: var(--muted); font-size: var(--admin-text-small); line-height: 1.65; }
 
 .ms-field__control { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 11px; }
-.ms-input { width: 148px; border: 1px solid var(--line); border-radius: 12px 4px 12px 4px; background: var(--field); padding: 9px 12px; color: var(--ink); font-family: var(--font-display); font-size: .9rem; font-weight: 780; letter-spacing: -.02em; font-variant-numeric: tabular-nums; outline: none; transition: border-color 140ms ease, box-shadow 140ms ease; }
+.ms-input { width: 148px; border: 1px solid var(--line); border-radius: 12px 4px 12px 4px; background: var(--field); padding: 9px 12px; color: var(--ink); font-family: var(--font-display); font-size: .9rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; outline: none; transition: border-color 140ms ease, box-shadow 140ms ease; }
 .ms-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 .ms-input[aria-invalid='true'] { border-color: var(--danger); }
-.ms-field__unit { color: var(--muted); font-size: .72rem; font-weight: 620; }
+.ms-field__unit { color: var(--muted); font-size: var(--admin-text-small); font-weight: 600; }
 
-.ms-reset { margin-left: auto; border: 1px solid var(--line); border-radius: 999px; background: transparent; padding: 6px 13px; color: var(--brand); font-family: var(--font-display); font-size: .69rem; font-weight: 800; transition: background 140ms ease; }
+.ms-reset { margin-left: auto; border: 1px solid var(--line); border-radius: 999px; background: transparent; padding: 6px 13px; color: var(--brand); font-family: var(--font-display); font-size: var(--admin-text-small); font-weight: 700; transition: background 140ms ease; }
 .ms-reset:hover:not(:disabled) { background: var(--brand-soft); }
 .ms-reset:disabled { cursor: not-allowed; opacity: .45; }
 
-.ms-field__error { margin-top: 8px; color: var(--danger); font-size: .71rem; font-weight: 680; line-height: 1.5; }
+.ms-field__error { margin-top: 8px; color: var(--danger); font-size: var(--admin-text-small); font-weight: 700; line-height: 1.5; }
 
-.ms-field__foot { display: flex; flex-wrap: wrap; gap: 5px 16px; margin-top: 10px; color: var(--muted-2); font-size: .67rem; line-height: 1.5; }
-.ms-field__foot b { color: var(--muted); font-family: var(--font-display); font-weight: 800; }
-.ms-field__unsaved { color: var(--brand); font-weight: 780; }
-.ms-field__env { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .62rem; opacity: .8; }
+.ms-field__foot { display: flex; flex-wrap: wrap; gap: 5px 16px; margin-top: 10px; color: var(--muted-2); font-size: var(--admin-text-small); line-height: 1.5; }
+.ms-field__foot b { color: var(--muted); font-family: var(--font-display); font-weight: 700; }
+.ms-field__unsaved { color: var(--brand); font-weight: 700; }
+.ms-field__env { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--admin-text-small); opacity: .8; }
 
 /* The one thing on this page an admin cannot change from this page. */
-.ms-note { margin-top: 20px; border: 1px solid rgba(240,167,47,.32); border-radius: 14px 4px 14px 4px; background: rgba(240,167,47,.08); padding: 13px 15px; color: var(--muted); font-size: .72rem; line-height: 1.65; }
-.ms-note b { color: var(--ink); font-family: var(--font-display); font-weight: 800; }
+.ms-note { margin-top: 20px; border: 1px solid rgba(240,167,47,.32); border-radius: 14px 4px 14px 4px; background: rgba(240,167,47,.08); padding: 13px 15px; color: var(--muted); font-size: var(--admin-text-small); line-height: 1.65; }
+.ms-note b { color: var(--ink); font-family: var(--font-display); font-weight: 700; }
 
-.ms-audit__empty { margin-top: 14px; color: var(--muted-2); font-size: .73rem; }
+.ms-audit__empty { margin-top: 14px; color: var(--muted-2); font-size: var(--admin-text-small); }
 .ms-audit__list { display: grid; gap: 2px; margin-top: 14px; }
-.ms-audit__item { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding: 9px 0; font-size: .72rem; }
+.ms-audit__item { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding: 9px 0; font-size: var(--admin-text-small); }
 .ms-audit__item:last-child { border-bottom: 0; }
-.ms-audit__item b { color: var(--ink); font-family: var(--font-display); font-weight: 780; }
+.ms-audit__item b { color: var(--ink); font-family: var(--font-display); font-weight: 700; }
 .ms-audit__change { margin-left: 9px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.ms-audit__meta { color: var(--muted-2); font-size: .66rem; }
+.ms-audit__meta { color: var(--muted-2); font-size: var(--admin-text-caption); }
 
 /* Sticky save bar: the dirty state is always visible, never scrolled past. */
 .ms-savebar { position: sticky; bottom: 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 18px 5px 18px 5px; background: var(--panel); padding: 13px 18px; box-shadow: 0 12px 32px rgba(35,29,55,.1); transition: border-color 160ms ease; }
 .ms-savebar.is-active { border-color: var(--brand); }
-.ms-savebar__status { color: var(--muted); font-family: var(--font-display); font-size: .75rem; font-weight: 700; }
-.ms-savebar.is-active .ms-savebar__status { color: var(--brand); font-weight: 760; }
+.ms-savebar__status { color: var(--muted); font-family: var(--font-display); font-size: var(--admin-text-small); font-weight: 700; }
+.ms-savebar.is-active .ms-savebar__status { color: var(--brand); font-weight: 700; }
 .ms-savebar__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
-.ms-primary-button { border-radius: 999px; background: var(--brand); padding: 9px 20px; color: #fff; font-family: var(--font-display); font-size: .76rem; font-weight: 800; letter-spacing: -.01em; transition: opacity 140ms ease; }
+.ms-primary-button { border-radius: 999px; background: var(--brand); padding: 9px 20px; color: #fff; font-family: var(--font-display); font-size: var(--admin-text-small); font-weight: 700; letter-spacing: -0.01em; transition: opacity 140ms ease; }
 .ms-primary-button:hover:not(:disabled) { opacity: .9; }
 .ms-primary-button:disabled { cursor: not-allowed; opacity: .4; }
 
-.ms-ghost-button { border: 1px solid var(--line); border-radius: 999px; background: transparent; padding: 8px 17px; color: var(--muted); font-family: var(--font-display); font-size: .74rem; font-weight: 780; transition: background 140ms ease, color 140ms ease; }
+.ms-ghost-button { border: 1px solid var(--line); border-radius: 999px; background: transparent; padding: 8px 17px; color: var(--muted); font-family: var(--font-display); font-size: var(--admin-text-small); font-weight: 700; transition: background 140ms ease, color 140ms ease; }
 .ms-ghost-button:hover:not(:disabled) { background: var(--bg); color: var(--ink); }
 .ms-ghost-button:disabled { cursor: not-allowed; opacity: .4; }
 

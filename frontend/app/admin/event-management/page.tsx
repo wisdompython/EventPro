@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { api, Event } from '@/lib/api'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminLoadError } from '@/components/admin/AdminLoadError'
+import { useAuth } from '@/lib/auth'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
 
@@ -25,10 +27,15 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 const selectCls = 'rounded-lg px-3 py-2 text-xs font-semibold focus:outline-none'
 
 export default function EventsPage() {
+  const { can } = useAuth()
+  const canManage = can('event_manager')
   const [events, setEvents]   = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState<number | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [reload, setReload] = useState(0)
 
   const [search, setSearch]         = useState('')
   const [status, setStatus]         = useState<StatusFilter>('all')
@@ -37,8 +44,11 @@ export default function EventsPage() {
   const [sort, setSort]             = useState<SortKey>('date_desc')
 
   useEffect(() => {
-    api.getEvents().then(setEvents).catch(console.error).finally(() => setLoading(false))
-  }, [])
+    let cancelled = false
+    setLoading(true); setLoadError('')
+    api.getEvents().then((items) => { if (!cancelled) setEvents(items) }).catch(() => { if (!cancelled) setLoadError('Could not load events. Please retry.') }).finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [reload])
 
   const filteredEvents = useMemo(() => {
     let result = events
@@ -81,21 +91,25 @@ export default function EventsPage() {
   }
 
   async function handleToggleEnded(ev: Event) {
+    if (!canManage) return
+    setActionError('')
     setTogglingId(ev.id)
     try {
       const updated = await api.updateEvent(ev.id, { is_ended: !ev.is_ended })
       setEvents((prev) => prev.map((e) => e.id === ev.id ? updated : e))
-    } catch {}
+    } catch { setActionError('The event status could not be updated. Please retry.') }
     finally { setTogglingId(null) }
   }
 
   async function handleDelete(id: number, name: string) {
+    if (!canManage) return
     if (!confirm(`Delete event "${name}"? This cannot be undone.`)) return
     setDeleting(id)
+    setActionError('')
     try {
       await api.deleteEvent(id)
       setEvents((prev) => prev.filter((e) => e.id !== id))
-    } catch {}
+    } catch { setActionError('The event could not be deleted. Please retry.') }
     finally { setDeleting(null) }
   }
 
@@ -104,9 +118,10 @@ export default function EventsPage() {
       <AdminPageHeader
         eyebrow="Event portfolio"
         title="Event management"
-        description={hasActiveFilters ? `${filteredEvents.length} of ${events.length} events match this view.` : `Manage the full lifecycle of ${events.length} event${events.length === 1 ? '' : 's'}, from planning through the door.`}
-        actions={<Link href="/admin/event-management/add" data-tour="events-new-button" className="admin-primary-action"><span>＋</span> Create event</Link>}
+        description={loadError ? 'Your event portfolio is unavailable.' : hasActiveFilters ? `${filteredEvents.length} of ${events.length} events match this view.` : `Manage the full lifecycle of ${events.length} event${events.length === 1 ? '' : 's'}, from planning through the door.`}
+        actions={canManage && <Link href="/admin/event-management/add" data-tour="events-new-button" className="admin-primary-action"><span>＋</span> Create event</Link>}
       />
+      {actionError && <AdminLoadError message={actionError} />}
 
       {events.length > 0 && <div className="admin-stat-strip">
         <div className="admin-stat"><span>Total events</span><strong>{events.length}</strong></div>
@@ -122,11 +137,12 @@ export default function EventsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name or venue…"
+            aria-label="Search events by name or venue"
             className="min-w-[180px] flex-1 rounded-lg px-3 py-2 text-xs focus:outline-none"
             style={{ border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)' }}
           />
 
-          <select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}
+          <select aria-label="Event status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}
             className={selectCls} style={{ border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)' }}>
             <option value="all">All statuses</option>
             <option value="upcoming">Upcoming</option>
@@ -134,16 +150,16 @@ export default function EventsPage() {
           </select>
 
           <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted)' }}>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+            <input type="date" aria-label="Events from date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
               className="rounded-lg px-2.5 py-2 text-xs focus:outline-none"
               style={{ border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)' }} />
             <span>to</span>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+            <input type="date" aria-label="Events through date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
               className="rounded-lg px-2.5 py-2 text-xs focus:outline-none"
               style={{ border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)' }} />
           </div>
 
-          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}
+          <select aria-label="Sort events" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}
             className={selectCls} style={{ border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)' }}>
             {SORT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -163,7 +179,7 @@ export default function EventsPage() {
       <div className="admin-surface">
         {loading ? (
           <div className="py-16 text-center text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>
-        ) : events.length === 0 ? (
+        ) : loadError ? <AdminLoadError message={loadError} onRetry={() => setReload((value) => value + 1)} /> : events.length === 0 ? (
           <div className="py-20 flex flex-col items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'var(--panel)' }}>
               <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" style={{ color: 'var(--muted)' }}>
@@ -174,11 +190,11 @@ export default function EventsPage() {
               <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>No events yet</p>
               <p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>Create your first event to start managing guests.</p>
             </div>
-            <Link href="/admin/event-management/add"
+            {canManage && <Link href="/admin/event-management/add"
               className="rounded-full px-5 py-2 text-xs font-semibold text-white transition hover:opacity-90"
               style={{ background: 'var(--brand)' }}>
               + Create Event
-            </Link>
+            </Link>}
           </div>
         ) : filteredEvents.length === 0 ? (
           <div className="py-20 flex flex-col items-center gap-4">
@@ -213,7 +229,7 @@ export default function EventsPage() {
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       {ev.is_ended && (
-                        <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: 'rgba(156,163,175,0.15)', color: 'var(--muted)' }}>Ended</span>
+                        <span className="rounded px-1.5 py-0.5 text-[12px] font-semibold" style={{ background: 'rgba(156,163,175,0.15)', color: 'var(--muted)' }}>Ended</span>
                       )}
                       <span className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>{ev.guest_count} guests</span>
                     </div>
@@ -229,13 +245,13 @@ export default function EventsPage() {
                   <div className="flex items-center gap-3">
                     <Link href={`/admin/event-management/${ev.id}`} className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>Open</Link>
                     <button onClick={() => exportEvent(ev.id)} className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>Export</button>
-                    <button onClick={() => handleToggleEnded(ev)} disabled={togglingId === ev.id}
+                    {canManage && <><button onClick={() => handleToggleEnded(ev)} disabled={togglingId === ev.id}
                       className="text-xs font-semibold disabled:opacity-40"
                       style={{ color: ev.is_ended ? 'var(--brand)' : 'var(--muted)' }}>
                       {togglingId === ev.id ? '…' : ev.is_ended ? 'Reopen' : 'End'}
                     </button>
                     <button onClick={() => handleDelete(ev.id, ev.name)} disabled={deleting === ev.id}
-                      className="text-xs font-semibold disabled:opacity-40" style={{ color: 'var(--danger)' }}>Delete</button>
+                      className="text-xs font-semibold disabled:opacity-40" style={{ color: 'var(--danger)' }}>Delete</button></>}
                   </div>
                 </div>
               ))}
@@ -263,7 +279,7 @@ export default function EventsPage() {
                         <div className="flex items-center gap-2">
                           {ev.name}
                           {ev.is_ended && (
-                            <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: 'rgba(156,163,175,0.15)', color: 'var(--muted)' }}>Ended</span>
+                            <span className="rounded px-1.5 py-0.5 text-[12px] font-semibold" style={{ background: 'rgba(156,163,175,0.15)', color: 'var(--muted)' }}>Ended</span>
                           )}
                         </div>
                       </td>
@@ -294,13 +310,13 @@ export default function EventsPage() {
                         <div className="flex items-center gap-3">
                           <Link href={`/admin/event-management/${ev.id}`} className="text-xs font-semibold hover:underline" style={{ color: 'var(--brand)' }}>Open</Link>
                           <button onClick={() => exportEvent(ev.id)} className="text-xs font-semibold hover:underline" style={{ color: 'var(--muted)' }}>Export</button>
-                          <button onClick={() => handleToggleEnded(ev)} disabled={togglingId === ev.id}
+                          {canManage && <><button onClick={() => handleToggleEnded(ev)} disabled={togglingId === ev.id}
                             className="text-xs font-semibold transition hover:opacity-70 disabled:opacity-40"
                             style={{ color: ev.is_ended ? 'var(--brand)' : 'var(--muted)' }}>
                             {togglingId === ev.id ? '…' : ev.is_ended ? 'Reopen' : 'End'}
                           </button>
                           <button onClick={() => handleDelete(ev.id, ev.name)} disabled={deleting === ev.id}
-                            className="text-xs font-semibold transition hover:opacity-70 disabled:opacity-40" style={{ color: 'var(--danger)' }}>Delete</button>
+                            className="text-xs font-semibold transition hover:opacity-70 disabled:opacity-40" style={{ color: 'var(--danger)' }}>Delete</button></>}
                         </div>
                       </td>
                     </tr>

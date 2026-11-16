@@ -10,6 +10,8 @@ import {
 } from '@/components/check-in/CheckInScreens'
 import type { InvalidReason } from '@/components/check-in/CheckInScreens'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
+import { useAuth } from '@/lib/auth'
+import { recordCheckIn } from '@/lib/checkInTransaction'
 
 type ScanState = 'idle' | 'loading' | 'found' | 'checked_in' | 'duplicate' | 'invalid'
 
@@ -24,6 +26,7 @@ function looksLikeCompleteScan(value: string) {
 }
 
 export default function CheckInPage() {
+  const { isScanner } = useAuth()
   const [token, setToken] = useState('')
   const [state, setState] = useState<ScanState>('idle')
   const [guest, setGuest] = useState<CheckInGuest | null>(null)
@@ -34,16 +37,30 @@ export default function CheckInPage() {
   const [nameQuery, setNameQuery] = useState('')
   const [nameResults, setNameResults] = useState<Guest[]>([])
   const [nameSearching, setNameSearching] = useState(false)
+  const [eventError, setEventError] = useState('')
+  const [nameError, setNameError] = useState('')
+  const [checkInError, setCheckInError] = useState('')
+  const operationRef = useRef(0)
+  const searchRequestRef = useRef(0)
+  const checkInPendingRef = useRef(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const nameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => {
+  function loadEvents() {
+    if (isScanner) return
+    setEventError('')
     api.getEvents().then((eventList) => {
       setEvents(eventList)
-      if (eventList.length > 0) setSelectedEventId(String(eventList[0].id))
-    }).catch(() => {})
-  }, [])
+      const requested = new URLSearchParams(window.location.search).get('event')
+      if (requested && !eventList.some((event) => String(event.id) === requested)) {
+        setSelectedEventId('')
+        setEventError('The selected event is unavailable. Choose another event for name search.')
+      } else setSelectedEventId(requested ?? String(eventList[0]?.id ?? ''))
+    }).catch(() => setEventError('Could not load events. Name search is unavailable.'))
+  }
+
+  useEffect(() => { loadEvents() }, [isScanner])
 
   useEffect(() => {
     if (state === 'idle') {
@@ -53,21 +70,27 @@ export default function CheckInPage() {
   }, [state])
 
   useEffect(() => () => {
+    operationRef.current += 1
+    searchRequestRef.current += 1
     if (nameTimerRef.current) clearTimeout(nameTimerRef.current)
     if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
   }, [])
 
   async function lookupGuest(raw: string) {
     const value = raw.trim()
-    if (!value || state === 'loading') return
+    if (!value || state === 'loading' || checkInPendingRef.current) return
+    const request = ++operationRef.current
     if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
     setState('loading')
     setGuest(null)
+    setCheckInError('')
     try {
       const foundGuest = await api.scanGuest(value)
+      if (request !== operationRef.current) return
       setGuest(foundGuest)
       setState(partyFullyCheckedIn(foundGuest) ? 'duplicate' : 'found')
     } catch (err: unknown) {
+      if (request !== operationRef.current) return
       const message = err instanceof Error ? err.message : ''
       if (!navigator.onLine || message.toLowerCase().includes('failed to fetch') || message.toLowerCase().includes('networkerror')) {
         setInvalidReason('offline')
@@ -96,52 +119,62 @@ export default function CheckInPage() {
   function handleNameSearch(value: string, eventId?: string) {
     setNameQuery(value)
     setNameResults([])
+    setNameError('')
+    const request = ++searchRequestRef.current
     if (nameTimerRef.current) clearTimeout(nameTimerRef.current)
-    if (value.trim().length < 2) return
+    if (value.trim().length < 2) { setNameSearching(false); return }
+    setNameSearching(true)
     const resolvedEventId = eventId ?? selectedEventId
+    if (!resolvedEventId) { setNameSearching(false); setNameError('Choose an event before searching for a guest.'); return }
     nameTimerRef.current = setTimeout(async () => {
       setNameSearching(true)
       try {
         const params: Record<string, string> = { search: value.trim(), page_size: '10' }
         if (resolvedEventId) params.event = resolvedEventId
         const data = await api.getGuests(params)
+        if (request !== searchRequestRef.current) return
         setNameResults(data.results)
       } catch {
-        setNameResults([])
+        if (request === searchRequestRef.current) setNameError('Guest search failed. Check your connection and retry.')
       } finally {
-        setNameSearching(false)
+        if (request === searchRequestRef.current) setNameSearching(false)
       }
     }, 350)
   }
 
   function handleEventChange(eventId: string) {
+    setEventError('')
     setSelectedEventId(eventId)
+    const url = new URL(window.location.href)
+    url.searchParams.set('event', eventId)
+    window.history.replaceState(window.history.state, '', url)
     setNameResults([])
     if (nameQuery.trim().length >= 2) handleNameSearch(nameQuery, eventId)
   }
 
   async function handleCheckIn(target: 'guest' | 'plus_one' | 'both') {
-    if (!guest) return
-    setCheckingIn(true)
-    const optimisticGuest = {
-      ...guest,
-      status: target !== 'plus_one' ? 'checked_in' as const : guest.status,
-      plus_one_checked_in: target !== 'guest' ? true : guest.plus_one_checked_in,
-    }
-    setGuest(optimisticGuest)
-    setState('checked_in')
+    if (!guest || checkInPendingRef.current) return
+    checkInPendingRef.current = true
+    const request = ++operationRef.current
     try {
-      const updated = await api.checkIn(guest.id, target)
-      setGuest(updated)
-    } catch (err: unknown) {
-      setGuest(guest)
-      setState(err instanceof Error && err.message.includes('409') ? 'duplicate' : 'found')
+      await recordCheckIn({
+        request: () => api.checkIn(guest.id, target),
+        isCurrent: () => request === operationRef.current,
+        onPending: () => { setCheckingIn(true); setCheckInError('') },
+        onConfirmed: (updated) => { setGuest(updated); setState('checked_in') },
+        onConflict: () => setState('duplicate'),
+        onFailure: () => setCheckInError('Check-in was not confirmed. Check your connection and retry before admitting this guest.'),
+      })
     } finally {
-      setCheckingIn(false)
+      checkInPendingRef.current = false
+      if (request === operationRef.current) setCheckingIn(false)
     }
   }
 
   function reset() {
+    if (checkInPendingRef.current) return
+    operationRef.current += 1
+    searchRequestRef.current += 1
     if (nameTimerRef.current) clearTimeout(nameTimerRef.current)
     if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
     setToken('')
@@ -152,13 +185,15 @@ export default function CheckInPage() {
     setNameQuery('')
     setNameResults([])
     setNameSearching(false)
+    setCheckInError('')
+    setNameError('')
   }
 
   if (state === 'checked_in' && guest) return <CheckedInScreen guest={guest} onNext={reset} />
   if (state === 'duplicate' && guest) return <DuplicateScreen guest={guest} onNext={reset} />
   if (state === 'invalid') return <InvalidScreen onReset={reset} reason={invalidReason} />
   if (state === 'found' && guest) return (
-    <GuestFoundScreen guest={guest} checkingIn={checkingIn} onConfirm={handleCheckIn} onCancel={reset} />
+    <GuestFoundScreen guest={guest} checkingIn={checkingIn} error={checkInError} onConfirm={handleCheckIn} onCancel={reset} />
   )
 
   return (
@@ -206,7 +241,8 @@ export default function CheckInPage() {
           </button>
         </form>
 
-        <div className="mt-6 rounded-xl p-5 sm:p-6" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
+        {!isScanner && <div className="mt-6 rounded-xl p-5 sm:p-6" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
+            {eventError && <p role="alert" className="mb-4 text-sm text-[var(--danger)]">{eventError} <button type="button" onClick={loadEvents} className="underline">Retry</button></p>}
             <div className="mb-4 flex items-center gap-3">
               <span className="h-px flex-1" style={{ background: 'var(--line)' }} />
               <span className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--muted-2)' }}>Name search fallback</span>
@@ -223,6 +259,7 @@ export default function CheckInPage() {
                 value={selectedEventId}
                 onChange={handleEventChange}
                 placeholder="Select event…"
+                aria-label="Event for name search"
                 searchPlaceholder="Search events…"
                 style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: '2px' }}
               />
@@ -231,6 +268,8 @@ export default function CheckInPage() {
                 value={nameQuery}
                 onChange={(event) => handleNameSearch(event.target.value)}
                 placeholder="Type guest name…"
+                aria-label="Search guest names"
+                disabled={!!eventError || !selectedEventId}
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="words"
@@ -242,7 +281,8 @@ export default function CheckInPage() {
 
             <div className="mt-3 max-h-72 overflow-auto">
               {nameSearching && <p className="py-8 text-center text-sm" style={{ color: 'var(--muted)' }}>Searching…</p>}
-              {!nameSearching && nameQuery.trim().length >= 2 && nameResults.length === 0 && (
+              {nameError && <p role="alert" className="py-4 text-sm text-[var(--danger)]">{nameError} <button type="button" onClick={() => handleNameSearch(nameQuery)} className="underline">Retry</button></p>}
+              {!nameSearching && !nameError && nameQuery.trim().length >= 2 && nameResults.length === 0 && (
                 <p className="py-8 text-center text-sm" style={{ color: 'var(--muted)' }}>No guests found</p>
               )}
               {nameResults.map((result) => (
@@ -265,7 +305,7 @@ export default function CheckInPage() {
                 </button>
               ))}
             </div>
-        </div>
+        </div>}
       </div>
     </div>
   )

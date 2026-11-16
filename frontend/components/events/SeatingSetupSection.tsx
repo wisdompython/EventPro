@@ -78,8 +78,8 @@ export function SeatingSetupSection({ step, enabled, areas, onEnabledChange, onA
           <div>
             <p className="form-label">Start with a layout</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              {PRESETS.map((preset) => <button key={preset.name} type="button" onClick={() => applyPreset(preset)} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-left transition hover:border-[var(--brand)]"><strong className="block text-xs text-[var(--ink)]">{preset.name}</strong><span className="mt-1 block text-[11px] leading-4 text-[var(--muted)]">{preset.description}</span></button>)}
-              <button type="button" onClick={() => onAreasChange([{ id: uid(), name: '', prefix: '', table_count: 1, seats_per_table: 8, shape: 'round', is_reserved: false }])} className="rounded-xl border border-dashed border-[var(--line)] bg-white px-4 py-3 text-left transition hover:border-[var(--brand)]"><strong className="block text-xs text-[var(--ink)]">Custom layout</strong><span className="mt-1 block text-[11px] leading-4 text-[var(--muted)]">Start with one empty seating area.</span></button>
+              {PRESETS.map((preset) => <button key={preset.name} type="button" onClick={() => applyPreset(preset)} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-left transition hover:border-[var(--brand)]"><strong className="block text-xs text-[var(--ink)]">{preset.name}</strong><span className="mt-1 block text-[12px] leading-4 text-[var(--muted)]">{preset.description}</span></button>)}
+              <button type="button" onClick={() => onAreasChange([{ id: uid(), name: '', prefix: '', table_count: 1, seats_per_table: 8, shape: 'round', is_reserved: false }])} className="rounded-xl border border-dashed border-[var(--line)] bg-white px-4 py-3 text-left transition hover:border-[var(--brand)]"><strong className="block text-xs text-[var(--ink)]">Custom layout</strong><span className="mt-1 block text-[12px] leading-4 text-[var(--muted)]">Start with one empty seating area.</span></button>
             </div>
           </div>
 
@@ -87,7 +87,7 @@ export function SeatingSetupSection({ step, enabled, areas, onEnabledChange, onA
 
           <div className="space-y-3">
             {areas.map((area, index) => <div key={area.id} className="rounded-2xl border border-[var(--line)] bg-white p-4">
-              <div className="mb-4 flex items-center justify-between"><div><span className="text-[10px] font-semibold uppercase tracking-[.15em] text-[var(--brand)]">Area {index + 1}</span><p className="mt-0.5 text-sm font-semibold text-[var(--ink)]">{area.name || 'New seating area'}</p></div><button type="button" onClick={() => onAreasChange(areas.filter((item) => item.id !== area.id))} className="text-xs font-semibold text-red-600">Remove</button></div>
+              <div className="mb-4 flex items-center justify-between"><div><span className="text-[12px] font-semibold uppercase tracking-[.15em] text-[var(--brand)]">Area {index + 1}</span><p className="mt-0.5 text-sm font-semibold text-[var(--ink)]">{area.name || 'New seating area'}</p></div><button type="button" onClick={() => onAreasChange(areas.filter((item) => item.id !== area.id))} className="text-xs font-semibold text-red-600">Remove</button></div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="sm:col-span-2"><label className="form-label">Area name *</label><input value={area.name} onChange={(event) => update(area.id, { name: event.target.value })} required placeholder="e.g. Bride’s side" className="form-control" /></div>
                 <div><label className="form-label">Table prefix</label><input value={area.prefix} onChange={(event) => update(area.id, { prefix: event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) })} placeholder="Auto" className="form-control" /></div>

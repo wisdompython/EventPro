@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { api, Event, Guest, GuestListStats, RsvpStats } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
+import { AdminLoadError } from '@/components/admin/AdminLoadError'
 import './dashboard.css'
 
 /** Distance to the event, in whole days, measured from the start of today. */
@@ -37,7 +38,7 @@ interface Exception {
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { user, isScanner } = useAuth()
+  const { user, isScanner, can } = useAuth()
   const [events, setEvents] = useState<Event[]>([])
   const [activeEvent, setActiveEvent] = useState<Event | null>(null)
   const [stats, setStats] = useState<GuestListStats | null>(null)
@@ -45,46 +46,65 @@ export default function DashboardPage() {
   const [recentArrivals, setRecentArrivals] = useState<Guest[]>([])
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [detailError, setDetailError] = useState('')
+  const [reload, setReload] = useState(0)
+  const [detailReload, setDetailReload] = useState(0)
+  const [detailEventId, setDetailEventId] = useState<number | null>(null)
 
   useEffect(() => {
     if (isScanner) router.replace('/admin/door-desk')
   }, [isScanner, router])
 
   useEffect(() => {
+    if (isScanner) return
+    let cancelled = false
+    setLoading(true)
+    setError('')
     api.getEvents()
       .then((result) => {
+        if (cancelled) return
         setEvents(result)
         const upcoming = [...result]
           .filter((event) => !event.is_ended)
           .sort((a, b) => +new Date(a.date) - +new Date(b.date))
-        setActiveEvent(upcoming[0] ?? result[0] ?? null)
+        const requested = Number(new URLSearchParams(window.location.search).get('event'))
+        setActiveEvent(result.find((event) => event.id === requested) ?? upcoming[0] ?? result[0] ?? null)
       })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
+      .catch(() => { if (!cancelled) setError('Could not load events. Your event list is unavailable.') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [reload, isScanner])
 
   useEffect(() => {
     if (!activeEvent) { setStats(null); setRsvpStats(null); setRecentArrivals([]); return }
     let cancelled = false
     setDetailLoading(true)
+    setDetailError('')
+    setStats(null); setRsvpStats(null); setRecentArrivals([])
+    const url = new URL(window.location.href)
+    url.searchParams.set('event', String(activeEvent.id))
+    window.history.replaceState(window.history.state, '', url)
 
     const workflowId = activeEvent.rsvp_workflow_id
     Promise.all([
       api.getGuests({ event: String(activeEvent.id), page_size: '1' }),
       api.getGuests({ event: String(activeEvent.id), ordering: '-checked_in', status: 'checked_in', page_size: '5' }),
-      workflowId ? api.getRsvpStats(workflowId).catch(() => null) : Promise.resolve(null),
+      workflowId ? api.getRsvpStats(workflowId) : Promise.resolve(null),
     ])
       .then(([overview, arrivals, workflowStats]) => {
         if (cancelled) return
         setStats(overview.stats ?? null)
+        setDetailEventId(activeEvent.id)
         setRecentArrivals(arrivals.results)
         setRsvpStats(workflowStats)
+        if (!overview.stats) setDetailError('Guest status is unavailable. Retry to check this event.')
       })
-      .catch((err) => { if (!cancelled) console.error(err) })
+      .catch(() => { if (!cancelled) setDetailError('Could not check guest and delivery status. Event readiness is unknown.') })
       .finally(() => { if (!cancelled) setDetailLoading(false) })
 
     return () => { cancelled = true }
-  }, [activeEvent?.id, activeEvent?.rsvp_workflow_id])
+  }, [activeEvent?.id, activeEvent?.rsvp_workflow_id, detailReload])
 
   /**
    * Work that will cost someone entry at the door if nobody acts on it.
@@ -164,6 +184,7 @@ export default function DashboardPage() {
   const firstName = user?.first_name || user?.username || 'there'
   const days = activeEvent ? daysUntil(activeEvent.date) : 0
   const criticalCount = exceptions.filter((item) => item.severity === 'critical').length
+  const checkingDetails = detailLoading || (!detailError && detailEventId !== activeEvent?.id)
 
   const upcoming = useMemo(() => (
     [...events]
@@ -176,13 +197,15 @@ export default function DashboardPage() {
     return <div className="ops-board"><div className="ops-skeleton"><i /><i /><i /></div></div>
   }
 
+  if (error) return <div className="ops-board"><AdminLoadError message={error} onRetry={() => setReload((value) => value + 1)} /></div>
+
   if (!activeEvent) {
     return (
       <div className="ops-board">
         <section className="ops-empty">
           <h2>Nothing to run yet</h2>
           <p>Create your first event, then bring in guests, send their passes, and work the door from here.</p>
-          <Link href="/admin/event-management/add" className="ops-btn">Create an event</Link>
+          {can('event_manager') && <Link href="/admin/event-management/add" className="ops-btn">Create an event</Link>}
         </section>
       </div>
     )
@@ -228,8 +251,9 @@ export default function DashboardPage() {
       <section className="ops-triage" aria-label="Needs attention">
         <div className="ops-triage__head">
           <h3>Needs attention</h3>
-          {detailLoading
+          {checkingDetails
             ? <span className="ops-triage__note">Checking\u2026</span>
+            : detailError ? <span className="ops-triage__note">Status unavailable</span>
             : <span className={'ops-triage__note' + (criticalCount ? ' is-critical' : '')}>
                 {exceptions.length === 0
                   ? 'Everything is on track'
@@ -237,10 +261,10 @@ export default function DashboardPage() {
               </span>}
         </div>
 
-        {exceptions.length === 0 ? (
+        {detailError ? <AdminLoadError message={detailError} onRetry={() => setDetailReload((value) => value + 1)} /> : checkingDetails ? <p className="ops-state" role="status">Checking guest and delivery status…</p> : exceptions.length === 0 ? (
           <div className="ops-clear">
             <p><b>No blockers.</b> Every confirmed guest has a pass and no messages have failed.</p>
-            <Link href="/admin/door-desk">Open door desk &rarr;</Link>
+            <Link href={`/admin/door-desk?event=${activeEvent.id}`}>Open door desk &rarr;</Link>
           </div>
         ) : (
           <ul className="ops-exceptions">
@@ -262,10 +286,10 @@ export default function DashboardPage() {
         <section className="ops-card" aria-label="Guest journey">
           <div className="ops-card__head">
             <h3>Guest journey</h3>
-            <Link href="/admin/guestbook">Open guestbook &rarr;</Link>
+            <Link href={`/admin/guestbook?event=${activeEvent.id}`}>Open guestbook &rarr;</Link>
           </div>
-          {funnel && funnel.invited === 0 ? (
-            <p className="ops-state">No guests yet. <Link href="/admin/list-import">Import a list</Link> to begin.</p>
+          {checkingDetails ? <p role="status" className="ops-state">Loading guest journey…</p> : detailError ? <p className="ops-state">Guest journey unavailable.</p> : funnel && funnel.invited === 0 ? (
+            <p className="ops-state">No guests yet. {can('event_manager') ? <><Link href={`/admin/list-import?event=${activeEvent.id}`}>Import a list</Link> to begin.</> : 'Ask an event manager to add guests.'}</p>
           ) : (
             <ol className="ops-funnel">
               {funnel?.stages.map((stage) => (
@@ -285,9 +309,9 @@ export default function DashboardPage() {
         <section className="ops-card" aria-label="Recent arrivals">
           <div className="ops-card__head">
             <h3>Recent arrivals</h3>
-            <Link href="/admin/door-desk">Door desk &rarr;</Link>
+            <Link href={`/admin/door-desk?event=${activeEvent.id}`}>Door desk &rarr;</Link>
           </div>
-          {detailLoading ? (
+          {detailError ? <p className="ops-state">Recent arrivals unavailable.</p> : checkingDetails ? (
             <p className="ops-state">Loading\u2026</p>
           ) : recentArrivals.length === 0 ? (
             <p className="ops-state">Nobody has checked in yet. Arrivals appear here as they are scanned.</p>

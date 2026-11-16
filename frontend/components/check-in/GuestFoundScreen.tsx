@@ -9,17 +9,18 @@ const TICKET_COLORS: Record<string, { bg: string; color: string; border: string 
 }
 
 export function GuestFoundScreen({
-  guest, checkingIn, onConfirm, onCancel,
+  guest, checkingIn, onConfirm, onCancel, error,
 }: {
   guest: CheckInGuest
   checkingIn: boolean
   onConfirm: (target: 'guest' | 'plus_one' | 'both') => void
   onCancel: () => void
+  error?: string
 }) {
   return (
     <div className="h-full overflow-auto flex flex-col px-4 py-8 max-w-lg mx-auto" style={{ background: 'var(--bg)' }}>
       <div className="flex items-center gap-3 mb-8">
-        <button onClick={onCancel}
+        <button onClick={onCancel} disabled={checkingIn} aria-label="Cancel guest lookup"
           className="w-10 h-10 rounded-sm border flex items-center justify-center transition hover:bg-[var(--bg)]"
           style={{ borderColor: 'var(--line)', color: 'var(--muted)', background: 'var(--panel)' }}>
           ←
@@ -29,6 +30,8 @@ export function GuestFoundScreen({
           <p className="text-sm font-medium" style={{ color: 'var(--ink)' }}>Confirm to check in</p>
         </div>
       </div>
+      {error && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
+      {checkingIn && <p role="status" className="mb-4 text-sm text-[var(--muted)]">Recording check-in. Please wait for confirmation…</p>}
       <div className="bg-[var(--chip)] overflow-hidden mb-6" style={{ border: '1px solid var(--line)', borderRadius: '2px' }}>
         <div className="px-6 py-6 border-b" style={{ borderColor: 'var(--line)' }}>
           <div className="flex items-start justify-between gap-3">
@@ -79,7 +82,7 @@ export function GuestFoundScreen({
         {guest.plus_one_attending && !guest.has_named_plus_one && !guest.plus_one_checked_in && <button onClick={() => onConfirm('plus_one')} disabled={checkingIn} className="w-full rounded-sm border border-[var(--brand)] py-4 text-sm font-semibold uppercase tracking-[0.06em] text-[var(--brand)] disabled:opacity-60">Check in plus one only</button>}
         {guest.status !== 'checked_in' && guest.plus_one_attending && !guest.has_named_plus_one && !guest.plus_one_checked_in && <button onClick={() => onConfirm('both')} disabled={checkingIn} className="w-full rounded-sm bg-[var(--ink)] py-4 text-sm font-semibold uppercase tracking-[0.06em] text-[var(--bg)] disabled:opacity-60">Check in both</button>}
       </div>
-      <button onClick={onCancel}
+      <button onClick={onCancel} disabled={checkingIn}
         className="w-full font-semibold rounded-sm py-4 text-sm transition-colors"
         style={{ border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--panel)' }}>
         Cancel

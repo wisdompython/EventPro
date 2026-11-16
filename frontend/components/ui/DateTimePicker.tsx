@@ -10,6 +10,7 @@ interface DateTimePickerProps {
   min?: string
   required?: boolean
   dataTour?: string
+  'aria-label'?: string
   onChange: (value: string) => void
 }
 
@@ -67,7 +68,7 @@ function displayValue(value: string) {
   })
 }
 
-export function DateTimePicker({ id, name, value, min, required, dataTour, onChange }: DateTimePickerProps) {
+export function DateTimePicker({ id, name, value, min, required, dataTour, onChange, 'aria-label': ariaLabel }: DateTimePickerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -172,7 +173,7 @@ export function DateTimePicker({ id, name, value, min, required, dataTour, onCha
         data-tour={dataTour}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={required ? 'Choose required event date and time' : 'Choose event date and time'}
+        aria-label={ariaLabel ?? (required ? 'Choose required event date and time' : 'Choose event date and time')}
         onClick={() => open ? setOpen(false) : openPicker()}
         className={`form-control flex min-h-[52px] w-full items-center justify-between gap-3 text-left transition ${open ? 'border-[var(--brand)] ring-4 ring-[var(--brand-soft)]' : ''}`}
       >
@@ -183,7 +184,7 @@ export function DateTimePicker({ id, name, value, min, required, dataTour, onCha
           <span className={`truncate text-sm ${value ? 'font-semibold text-[var(--ink)]' : 'text-[var(--muted)]'}`}>{displayValue(value)}</span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
-          <span className="rounded-full bg-[var(--brand-soft)] px-2 py-1 text-[10px] font-bold tracking-wide text-[var(--brand)]">WAT</span>
+          <span className="rounded-full bg-[var(--brand-soft)] px-2 py-1 text-[12px] font-bold tracking-wide text-[var(--brand)]">WAT</span>
           <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" className={`text-[var(--muted)] transition ${open ? 'rotate-180' : ''}`} aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg>
         </span>
       </button>
@@ -199,7 +200,7 @@ export function DateTimePicker({ id, name, value, min, required, dataTour, onCha
         // the fitting in one pass - no measurement, no placement state, and no
         // intermediate frame that can be wrong.
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center overscroll-contain p-3 sm:p-6"
+          className="admin-type-scope fixed inset-0 z-50 flex items-center justify-center overscroll-contain p-3 sm:p-6"
           onPointerDown={(event) => { if (event.target === event.currentTarget) setOpen(false) }}
         >
           <div className="absolute inset-0 bg-[rgba(23,21,34,0.45)]" aria-hidden="true" />
@@ -213,7 +214,7 @@ export function DateTimePicker({ id, name, value, min, required, dataTour, onCha
             className="relative z-10 flex max-h-full w-full max-w-[620px] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)] shadow-[0_24px_70px_rgba(31,24,74,0.22)]">
 
         <div className="flex flex-none items-center justify-between border-b border-[var(--line)] bg-[var(--brand-soft)] px-4 py-3">
-          <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--brand)]">Event schedule</p><p className="mt-0.5 text-sm font-semibold text-[var(--ink)]">{displayValue(`${draftDate}T${period === 'PM' ? pad((Number(hour) % 12) + 12) : pad(Number(hour) % 12)}:${minute}`)}</p></div>
+          <div><p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[var(--brand)]">Event schedule</p><p className="mt-0.5 text-sm font-semibold text-[var(--ink)]">{displayValue(`${draftDate}T${period === 'PM' ? pad((Number(hour) % 12) + 12) : pad(Number(hour) % 12)}:${minute}`)}</p></div>
           <button type="button" onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-full border border-[var(--line)] bg-[var(--panel)] text-[var(--muted)] transition hover:text-[var(--ink)]" aria-label="Close date picker">×</button>
         </div>
 
@@ -225,7 +226,7 @@ export function DateTimePicker({ id, name, value, min, required, dataTour, onCha
               <button type="button" onClick={() => setVisibleMonth((month) => new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="grid h-9 w-9 place-items-center rounded-full border border-[var(--line)] text-[var(--ink)] transition hover:border-[var(--brand)] hover:bg-[var(--brand-soft)]" aria-label="Next month">→</button>
             </div>
             <div className="grid grid-cols-7 gap-1 text-center">
-              {WEEKDAYS.map((day) => <span key={day} className="py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">{day}</span>)}
+              {WEEKDAYS.map((day) => <span key={day} className="py-1 text-[12px] font-bold uppercase tracking-wider text-[var(--muted)]">{day}</span>)}
               {calendarDays.map((day) => {
                 const key = dateKey(day)
                 const outsideMonth = day.getMonth() !== visibleMonth.getMonth()
@@ -237,15 +238,15 @@ export function DateTimePicker({ id, name, value, min, required, dataTour, onCha
           </div>
 
           <div className="border-t border-[var(--line)] bg-[var(--bg)] p-4 sm:border-l sm:border-t-0 sm:p-5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">Time</p>
+            <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">Time</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">Hour<select value={hour} onChange={(event) => setHour(event.target.value)} className="form-control mt-1.5 bg-[var(--panel)] text-sm font-semibold">{Array.from({ length: 12 }, (_, index) => String(index + 1)).map((item) => <option key={item} value={item}>{pad(Number(item))}</option>)}</select></label>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">Minute<select value={minute} onChange={(event) => setMinute(event.target.value)} className="form-control mt-1.5 bg-[var(--panel)] text-sm font-semibold">{MINUTES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label className="text-[12px] font-bold uppercase tracking-wider text-[var(--muted)]">Hour<select value={hour} onChange={(event) => setHour(event.target.value)} className="form-control mt-1.5 bg-[var(--panel)] text-sm font-semibold">{Array.from({ length: 12 }, (_, index) => String(index + 1)).map((item) => <option key={item} value={item}>{pad(Number(item))}</option>)}</select></label>
+              <label className="text-[12px] font-bold uppercase tracking-wider text-[var(--muted)]">Minute<select value={minute} onChange={(event) => setMinute(event.target.value)} className="form-control mt-1.5 bg-[var(--panel)] text-sm font-semibold">{MINUTES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
             </div>
             <div className="mt-3 grid grid-cols-2 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-1">
               {(['AM', 'PM'] as const).map((item) => <button key={item} type="button" onClick={() => setPeriod(item)} className={`rounded-lg py-2 text-xs font-bold transition ${period === item ? 'bg-[var(--brand)] text-white shadow-sm' : 'text-[var(--muted)] hover:text-[var(--ink)]'}`}>{item}</button>)}
             </div>
-            <div className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-[var(--brand)]">West Africa Time</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">UTC+1 · used for invitations, passes and reminders.</p></div>
+            <div className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3"><p className="text-[12px] font-bold uppercase tracking-wider text-[var(--brand)]">West Africa Time</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">UTC+1 · used for invitations, passes and reminders.</p></div>
           </div>
 
         {pickerError && <p role="alert" className="mx-4 mb-3 flex-none rounded-lg bg-[var(--danger-bg)] px-3 py-2 text-xs text-[var(--danger)] sm:mx-5">{pickerError}</p>}

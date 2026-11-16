@@ -110,7 +110,7 @@ export default function OrganizationPage() {
           </div>
 
           <div className="mt-5 rounded-xl px-4 py-3" style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted-2)' }}>Company workspace address</p>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted-2)' }}>Company workspace address</p>
             <p className="mt-1 font-mono text-sm" style={{ color: 'var(--ink)' }}>{organization.slug}</p>
           </div>
 

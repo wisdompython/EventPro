@@ -6,6 +6,7 @@ import type { OrganizationDomain, OrganizationDomainStatus } from '@/lib/api'
 import { useRequireAuth } from '@/lib/auth'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { ConfirmDialog, type ConfirmRequest } from '@/components/admin/ConfirmDialog'
+import { AdminLoadError } from '@/components/admin/AdminLoadError'
 
 const STATUS_TONE: Record<OrganizationDomainStatus, { background: string; color: string }> = {
   active: { background: 'rgba(22,163,74,0.1)', color: 'var(--success)' },
@@ -22,12 +23,14 @@ export default function DomainsPage() {
   const [busyId, setBusyId] = useState<number | null>(null)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
 
   const load = useCallback(() => {
+    setLoadError('')
     api.getDomains()
       .then(setDomains)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load your domains.'))
+      .catch(() => setLoadError('Could not load your domains. Displayed records may be out of date.'))
   }, [])
 
   useEffect(load, [load])
@@ -101,6 +104,7 @@ export default function DomainsPage() {
         title="Domains"
         description="Serve your guest RSVP pages from your own web address. Sign-in and administration stay here."
       />
+      {loadError && <AdminLoadError message={loadError} onRetry={load} />}
 
       {(message || error) && (
         <div
@@ -123,6 +127,7 @@ export default function DomainsPage() {
         </p>
         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
           <input
+            aria-label="Domain hostname"
             value={hostname}
             onChange={(event) => setHostname(event.target.value)}
             placeholder="rsvp.yourcompany.com"
@@ -138,7 +143,7 @@ export default function DomainsPage() {
         </div>
       </form>
 
-      {domains === null ? (
+      {domains === null && loadError ? null : domains === null ? (
         <div className="admin-surface p-6 text-sm" style={{ color: 'var(--muted)' }}>Loading domains…</div>
       ) : domains.length === 0 ? (
         <div className="admin-surface p-6 text-sm" style={{ color: 'var(--muted)' }}>
@@ -181,9 +186,9 @@ function DomainCard({ domain, busy, onVerify, onMakePrimary, onRemove }: {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="break-all font-mono text-base font-semibold" style={{ color: 'var(--ink)' }}>{domain.hostname}</h2>
-            <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={tone}>{domain.status_display}</span>
+            <span className="rounded-full px-2.5 py-0.5 text-[12px] font-semibold" style={tone}>{domain.status_display}</span>
             {domain.is_primary && (
-              <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white" style={{ background: 'var(--brand)' }}>Primary</span>
+              <span className="rounded-full px-2.5 py-0.5 text-[12px] font-semibold text-white" style={{ background: 'var(--brand)' }}>Primary</span>
             )}
           </div>
           <p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>
@@ -224,7 +229,7 @@ function DomainCard({ domain, busy, onVerify, onMakePrimary, onRemove }: {
 
       {needsDns && (
         <div className="mt-5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted-2)' }}>Add these records at your DNS provider</p>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted-2)' }}>Add these records at your DNS provider</p>
           <div className="mt-3 space-y-2">
             {domain.dns_records.map((record) => (
               <div key={`${record.type}-${record.name}-${record.value}`} className="grid gap-2 rounded-xl px-3.5 py-3 text-xs sm:grid-cols-[4rem_1fr_1fr]" style={{ border: '1px solid var(--line)', background: 'var(--bg)' }}>
@@ -258,7 +263,7 @@ function CopyValue({ label, value }: { label: string; value: string }) {
       className="min-w-0 text-left"
       title="Copy"
     >
-      <span className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted-2)' }}>{copied ? 'Copied' : label}</span>
+      <span className="block text-[12px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted-2)' }}>{copied ? 'Copied' : label}</span>
       <span className="block break-all font-mono" style={{ color: 'var(--ink)' }}>{value}</span>
     </button>
   )

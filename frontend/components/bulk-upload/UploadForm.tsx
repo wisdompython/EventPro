@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Event, SeatingSection } from '@/lib/api'
 
 interface Props {
@@ -27,6 +28,7 @@ export function UploadForm({
   events, selectedEvent, submitting, requiredCols, optionalCols, ticketTypes, seatingSections,
   replaceExisting, onReplaceExistingChange, onSubmit, onEventChange,
 }: Props) {
+  const router = useRouter()
   const [step, setStep] = useState(1)
   const [file, setFile] = useState<File | null>(null)
   const [flowError, setFlowError] = useState('')
@@ -42,13 +44,14 @@ export function UploadForm({
 
   return (
     <form onSubmit={onSubmit} className="form-card form-flow import-flow">
+      <fieldset disabled={submitting} className="min-w-0">
       <div className="form-flow__topline">
         <div><p>Guest list import</p><h2 data-tour="bulk-upload-header">{['Choose destination', 'Add your guest file', 'Review import'][step - 1]}</h2></div>
         <strong>{step}<span>/03</span></strong>
       </div>
       <div className="form-flow__progress"><i style={{ width: `${step * 33.333}%` }}/></div>
       <div className="form-flow__steps">
-        {['Destination', 'CSV file', 'Review'].map((label, index) => <button type="button" key={label} onClick={() => index + 1 < step && setStep(index + 1)} className={index + 1 === step ? 'is-active' : index + 1 < step ? 'is-complete' : ''}><span>{index + 1 < step ? '✓' : index + 1}</span>{label}</button>)}
+        {['Destination', 'CSV file', 'Review'].map((label, index) => <button type="button" key={label} aria-current={index + 1 === step ? 'step' : undefined} aria-label={`Step ${index + 1}: ${label}`} disabled={index + 1 > step} onClick={() => index + 1 < step && setStep(index + 1)} className={index + 1 === step ? 'is-active' : index + 1 < step ? 'is-complete' : ''}><span>{index + 1 < step ? '✓' : index + 1}</span>{label}</button>)}
       </div>
       {flowError && <p className="form-flow__error" role="alert">{flowError}</p>}
 
@@ -76,8 +79,8 @@ export function UploadForm({
           {seatingTables.length ? <div><span>Table number values</span><p>{seatingTables.slice(0, 24).map((table) => <code key={table.id}>{table.label}</code>)}{seatingTables.length > 24 ? <code>+{seatingTables.length - 24} more</code> : null}</p></div> : null}
         </div>
         <label className={`import-dropzone ${file ? 'has-file' : ''}`}>
-          <input ref={fileRef} data-tour="bulk-csv-input" name="csv_file" type="file" accept=".csv,text/csv" required onChange={(event) => { const next = event.target.files?.[0] ?? null; setFile(next); setFlowError('') }}/>
-          {file ? <><span className="import-dropzone__icon">✓</span><strong>{file.name}</strong><small>{formatBytes(file.size)} · Ready to validate</small><em>Choose a different file</em></> : <><span className="import-dropzone__icon">CSV</span><strong>Drop your guest list here</strong><small>or click to browse your computer</small><em>.CSV files only</em></>}
+          <input ref={fileRef} data-tour="bulk-csv-input" aria-label="Choose guest list CSV file" name="csv_file" type="file" accept=".csv,text/csv" required onChange={(event) => { const next = event.target.files?.[0] ?? null; setFile(next); setFlowError('') }}/>
+          {file ? <><span className="import-dropzone__icon">✓</span><strong>{file.name}</strong><small>{formatBytes(file.size)} · Ready to validate</small><em>Choose a different file</em></> : <><span className="import-dropzone__icon">CSV</span><strong>Choose your guest list</strong><small>Browse your computer</small><em>.CSV files only</em></>}
         </label>
         <p className="import-flow__privacy">Your file is validated for this event before any guest records are changed.</p>
       </section>
@@ -94,9 +97,10 @@ export function UploadForm({
       </section>
 
       <footer className="form-flow__footer">
-        <button type="button" onClick={() => step === 1 ? history.back() : setStep((current) => current - 1)} className="admin-secondary-action">{step === 1 ? 'Cancel' : '← Back'}</button>
+        <button type="button" onClick={() => step === 1 ? router.push(selectedEvent ? `/admin/guestbook?event=${selectedEvent.id}` : '/admin/guestbook') : setStep((current) => current - 1)} className="admin-secondary-action">{step === 1 ? 'Cancel' : '← Back'}</button>
         {step < 3 ? <button type="button" onClick={continueFlow} className="admin-primary-action">Continue →</button> : <button data-tour="bulk-submit-button" type="submit" disabled={submitting} className="admin-primary-action disabled:opacity-60">{submitting ? 'Processing…' : replaceExisting ? 'Validate & replace list' : 'Import guests'}</button>}
       </footer>
+      </fieldset>
     </form>
   )
 }

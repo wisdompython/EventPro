@@ -78,7 +78,7 @@ export default function FontsPage() {
         style={{ borderBottom: '1px solid var(--line)', background: 'var(--sidebar)' }}>
         <div>
           <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Pass studio</p>
-          <p className="text-[11px]" style={{ color: 'var(--muted)' }}>Font library &amp; pass preview</p>
+          <p className="text-[12px]" style={{ color: 'var(--muted)' }}>Font library &amp; pass preview</p>
         </div>
         {events.length > 0 && (
           <select
@@ -99,7 +99,7 @@ export default function FontsPage() {
 
           {/* Upload form */}
           <div className="p-5" style={{ borderBottom: '1px solid var(--line)' }}>
-            <p data-tour="fonts-upload-section" className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted)' }}>
+            <p data-tour="fonts-upload-section" className="mb-3 text-[12px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted)' }}>
               Upload Font
             </p>
 
@@ -161,14 +161,14 @@ export default function FontsPage() {
           {/* Font list */}
           <div className="flex-1 overflow-y-auto">
             <div className="px-5 py-3" style={{ borderBottom: '1px solid var(--line)' }}>
-              <p data-tour="fonts-library" className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted)' }}>
+              <p data-tour="fonts-library" className="text-[12px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted)' }}>
                 Library · {fonts.length} font{fonts.length !== 1 ? 's' : ''}
               </p>
             </div>
             {fonts.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
                 <p className="text-[13px]" style={{ color: 'var(--muted)' }}>No fonts uploaded yet.</p>
-                <p className="text-[11px] max-w-[180px]" style={{ color: 'var(--muted-2)' }}>
+                <p className="text-[12px] max-w-[180px]" style={{ color: 'var(--muted-2)' }}>
                   Upload a .ttf or .otf font to use on guest passes.
                 </p>
               </div>
@@ -184,7 +184,7 @@ export default function FontsPage() {
                       <div className="flex items-center gap-1.5">
                         <p className="text-[12px] font-semibold truncate" style={{ color: 'var(--ink)' }}>{f.name}</p>
                         {isActive && (
-                          <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                          <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[12px] font-bold uppercase tracking-wider"
                             style={{ background: 'var(--brand)', color: '#ffffff' }}>Active</span>
                         )}
                       </div>
@@ -199,7 +199,7 @@ export default function FontsPage() {
                       className="flex-shrink-0 mt-0.5 transition hover:opacity-70 disabled:opacity-40"
                       style={{ color: 'var(--danger)' }}>
                       {deleting === f.id ? (
-                        <span className="text-[11px]">…</span>
+                        <span className="text-[12px]">…</span>
                       ) : (
                         <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
                           <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
@@ -222,7 +222,7 @@ export default function FontsPage() {
             </p>
             {ev && (
               <a href={`/admin/event-management/${ev.id}/edit`}
-                className="text-[11px] font-semibold transition hover:opacity-80"
+                className="text-[12px] font-semibold transition hover:opacity-80"
                 style={{ color: 'var(--brand)' }}>
                 Edit event →
               </a>
@@ -244,7 +244,7 @@ export default function FontsPage() {
                     { label: 'Name Zone', x: ev.name_zone_x, y: ev.name_zone_y, w: ev.name_zone_w, h: ev.name_zone_h },
                   ].map(({ label, x, y, w, h }) => (
                     <div key={label} className="px-4 py-3" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
-                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted)' }}>{label}</p>
+                      <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted)' }}>{label}</p>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                         {[['X', x], ['Y', y], ['W', w], ['H', h]].map(([k, v]) => (
                           <div key={String(k)} className="flex items-center justify-between text-[12px]">
@@ -258,7 +258,7 @@ export default function FontsPage() {
                 </div>
                 {ev.name_font_name && (
                   <div className="mt-3 px-4 py-3" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
-                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted)' }}>Typography</p>
+                    <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted)' }}>Typography</p>
                     <div className="flex items-center gap-4 text-[12px]">
                       <span style={{ color: 'var(--muted)' }}>Font</span>
                       <span style={{ color: 'var(--ink)' }}>{ev.name_font_name}</span>

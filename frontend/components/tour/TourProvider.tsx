@@ -93,7 +93,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
       if (!el) { setRect(null); raf = requestAnimationFrame(measure); return }
       const r = el.getBoundingClientRect()
       setRect({ top: r.top, left: r.left, width: r.width, height: r.height })
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      el.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
     }
     measure()
 

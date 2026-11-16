@@ -11,18 +11,19 @@ interface Props {
   user: AuthUser
   logout: () => void
   onCollapse: () => void
+  closed: boolean
   pendingHref: string | null
   onNavigate: (href: string, label: string) => void
 }
 
-export function NavSidebar({ user, logout, onCollapse, pendingHref, onNavigate }: Props) {
+export function NavSidebar({ user, logout, onCollapse, closed, pendingHref, onNavigate }: Props) {
   const pathname = usePathname()
   const { can } = useAuth()
   const initial = (user.first_name?.[0] || user.username[0]).toUpperCase()
   const displayName = user.first_name ? `${user.first_name} ${user.last_name}`.trim() : user.username
 
   return (
-    <aside className="admin-sidebar">
+    <aside className="admin-sidebar" inert={closed}>
       <div className="admin-sidebar__brand">
         <Link href="/admin/today" onClick={() => onNavigate('/admin/today', 'Today')}><span>EP</span><div><b>Event Pro</b><small>Host operations</small></div></Link>
         <button type="button" className="admin-sidebar__collapse" onClick={onCollapse} aria-label="Collapse navigation" title="Collapse navigation">
@@ -58,6 +59,7 @@ export function NavSidebar({ user, logout, onCollapse, pendingHref, onNavigate }
                     className={`${active ? 'is-active' : ''}${pending ? ' is-pending' : ''}`}
                     onClick={() => onNavigate(item.href, item.label)}
                     aria-busy={pending || undefined}
+                    aria-current={active ? 'page' : undefined}
                   >
                     <NavIcon name={item.icon} />
                     <span>{item.label}</span>
@@ -70,7 +72,6 @@ export function NavSidebar({ user, logout, onCollapse, pendingHref, onNavigate }
         })}
       </nav>
 
-      <div className="admin-sidebar__status"><i /><span><b>Ready for guests</b><small>Messaging and doors online</small></span></div>
       <div className="admin-user-card">
         <Link href="/admin/profile" onClick={() => onNavigate('/admin/profile', 'My account')}><span>{initial}</span><div><b>{displayName}</b><small>{user.membership_role_display ?? user.role_display}</small></div></Link>
         <button onClick={logout} aria-label="Sign out" title="Sign out">

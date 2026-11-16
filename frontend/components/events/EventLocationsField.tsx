@@ -123,7 +123,7 @@ export function EventLocationsField({ event }: Props) {
               {rows.map((row, index) => (
                 <div key={row.key} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--muted-2)]">
+                    <span className="text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--muted-2)]">
                       Location {index + 1}
                     </span>
                     <div className="flex items-center gap-1">

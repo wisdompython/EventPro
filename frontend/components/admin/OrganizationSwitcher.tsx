@@ -4,10 +4,11 @@ import Link from 'next/link'
 import { useAuth } from '@/lib/auth'
 
 export function OrganizationSwitcher({ compact = false, tone = 'light' }: { compact?: boolean; tone?: 'light' | 'dark' }) {
-  const { user, switchOrganization } = useAuth()
+  const { user, switchOrganization, can } = useAuth()
   if (!user?.active_organization) return null
 
   if (user.organizations.length <= 1) {
+    if (!can('super_admin')) return <span className="block truncate text-xs" style={{ color: tone === 'dark' ? '#c3bacf' : 'var(--muted)' }}>{user.active_organization.name}</span>
     return (
       <Link
         href="/admin/company-profile"

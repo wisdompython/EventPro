@@ -32,7 +32,7 @@ export function UploadResults({ result }: { result: UploadResult }) {
     ? Math.min(100, Math.round((result.assets_processed / result.assets_total) * 100))
     : 0
   const title = result.status === 'pending'
-    ? pendingTooLong ? 'Waiting for an import worker' : 'Import queued'
+    ? pendingTooLong ? 'Import is taking longer to start' : 'Import queued'
     : result.status === 'failed'
       ? 'Import could not be completed'
       : running && !result.total_rows
@@ -57,23 +57,23 @@ export function UploadResults({ result }: { result: UploadResult }) {
                 ? <svg width="14" height="14" fill="none" stroke="#ef4444" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
                 : <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />}
           </div>
-          <span className="text-sm font-semibold text-[var(--ink)]">{title}</span>
+          <span role="status" aria-live="polite" className="text-sm font-semibold text-[var(--ink)]">{title}</span>
         </div>
         <div className="ml-auto flex items-center gap-4 text-sm">
           {result.successful > 0 && <span className="font-semibold text-emerald-700">✓ {result.successful} imported</span>}
-          {result.skipped > 0 && <span className="font-semibold text-amber-400">↷ {result.skipped} duplicate{result.skipped === 1 ? '' : 's'} skipped</span>}
+          {result.skipped > 0 && <span className="font-semibold text-amber-700">↷ {result.skipped} duplicate{result.skipped === 1 ? '' : 's'} skipped</span>}
           {result.failed > 0 && <span className="font-semibold text-[var(--danger)]">× {result.failed} failed</span>}
         </div>
       </div>
 
       {running && <div className="px-5 pb-4">
-        <div className="h-2 overflow-hidden rounded-full bg-[var(--bg)]">
+        <div role="progressbar" aria-label="Guest pass generation" aria-valuemin={0} aria-valuemax={100} aria-valuenow={result.assets_total ? assetPercent : undefined} className="h-2 overflow-hidden rounded-full bg-[var(--bg)]">
           <div className={`h-full rounded-full bg-[var(--brand)] transition-all ${result.assets_total ? '' : 'animate-pulse'}`} style={{ width: result.assets_total ? `${assetPercent}%` : '35%' }}/>
         </div>
         <p className="mt-2 text-xs text-[var(--muted)]">
           {pendingTooLong
-            ? 'The job has been queued for over a minute but has not started. Check that the Celery import worker is running.'
-            : 'You can leave this page. The import continues safely in the background.'}
+            ? 'Your import is still queued. You can return using its progress link. If the delay continues, contact your workspace administrator with the import number; avoid uploading the same file again.'
+            : 'You can leave this page. The import continues in the background; its progress link is saved under recent imports.'}
         </p>
       </div>}
 
@@ -90,7 +90,7 @@ export function UploadResults({ result }: { result: UploadResult }) {
       </div>}
 
       {result.errors.length > 0 && <div className="border-t border-[var(--line)]">
-        <button type="button" onClick={() => setShowErrors((value) => !value)} className="flex w-full items-center justify-between px-5 py-3 text-xs font-semibold text-[var(--danger)]">
+        <button type="button" aria-expanded={showErrors} onClick={() => setShowErrors((value) => !value)} className="flex w-full items-center justify-between px-5 py-3 text-xs font-semibold text-[var(--danger)]">
           <span>Failed rows ({result.errors.length})</span><span>{showErrors ? '−' : '+'}</span>
         </button>
         {showErrors && <div className="max-h-72 overflow-auto">
@@ -102,13 +102,13 @@ export function UploadResults({ result }: { result: UploadResult }) {
       </div>}
 
       {result.skipped_items.length > 0 && <div className="border-t border-[var(--line)]">
-        <button type="button" onClick={() => setShowSkipped((value) => !value)} className="flex w-full items-center justify-between px-5 py-3 text-xs font-semibold text-amber-400">
+        <button type="button" aria-expanded={showSkipped} onClick={() => setShowSkipped((value) => !value)} className="flex w-full items-center justify-between px-5 py-3 text-xs font-semibold text-amber-700">
           <span>Skipped duplicate phone numbers ({result.skipped_items.length})</span><span>{showSkipped ? '−' : '+'}</span>
         </button>
         {showSkipped && <div className="max-h-72 overflow-auto">
           <table className="w-full text-xs">
             <thead><tr className="border-y border-[var(--line)] bg-amber-500/5"><th className="w-16 px-5 py-2 text-left text-[var(--muted)]">Row</th><th className="px-5 py-2 text-left text-[var(--muted)]">Guest</th><th className="px-5 py-2 text-left text-[var(--muted)]">Phone</th><th className="px-5 py-2 text-left text-[var(--muted)]">Reason</th></tr></thead>
-            <tbody>{result.skipped_items.map((item, index) => <tr key={index} className="border-b border-[var(--line)]"><td className="px-5 py-2 font-mono font-bold text-amber-400">{item.row}</td><td className="px-5 py-2 text-[var(--ink)]">{item.full_name}</td><td className="px-5 py-2 font-mono text-[var(--ink)]">{item.phone_number}</td><td className="px-5 py-2 text-[var(--muted)]">{item.reason}</td></tr>)}</tbody>
+            <tbody>{result.skipped_items.map((item, index) => <tr key={index} className="border-b border-[var(--line)]"><td className="px-5 py-2 font-mono font-bold text-amber-700">{item.row}</td><td className="px-5 py-2 text-[var(--ink)]">{item.full_name}</td><td className="px-5 py-2 font-mono text-[var(--ink)]">{item.phone_number}</td><td className="px-5 py-2 text-[var(--muted)]">{item.reason}</td></tr>)}</tbody>
           </table>
         </div>}
       </div>}

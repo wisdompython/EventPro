@@ -1,10 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 
 import { api, RsvpRecipient, RsvpRecipientOrdering, RsvpRecipientSegment, RsvpResponseStatus, RsvpWorkflow } from '@/lib/api'
+import { AdminLoadError } from '@/components/admin/AdminLoadError'
+import { useRequireAuth } from '@/lib/auth'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
 
@@ -20,7 +22,7 @@ const SEGMENT_LABEL: Record<RsvpRecipientSegment, string> = {
 }
 
 function metric(label: string, value: number, note: string, color?: string, onClick?: () => void) {
-  const content = <><p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)' }}>{label}</p><p className="mt-2 text-3xl font-bold tabular-nums" style={{ color: color || 'var(--ink)' }}>{value}</p><p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>{note}</p></>
+  const content = <><p className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)' }}>{label}</p><p className="mt-2 text-3xl font-bold tabular-nums" style={{ color: color || 'var(--ink)' }}>{value}</p><p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>{note}</p></>
   const style = { background: 'var(--panel)', border: '1px solid var(--line)' }
   return onClick
     ? <button type="button" onClick={onClick} className="w-full rounded-[12px] p-4 text-left transition hover:-translate-y-0.5" style={style}>{content}</button>
@@ -32,6 +34,7 @@ const SEGMENT_VALUES: RsvpRecipientSegment[] = [
 ]
 
 export default function RsvpWorkflowDetailPage() {
+  useRequireAuth('event_manager')
   const id = Number(useParams<{ id: string }>().id)
   const router = useRouter()
   // Allow deep links such as ?segment=confirmed_no_pass so the dashboard can
@@ -55,13 +58,22 @@ export default function RsvpWorkflowDetailPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [loadError, setLoadError] = useState('')
+  const [reload, setReload] = useState(0)
+  const workflowRequestRef = useRef(0)
+  const recipientRequestRef = useRef(0)
+  const currentIdRef = useRef(id)
+  currentIdRef.current = id
 
   const loadWorkflow = useCallback(async () => {
+    const request = ++workflowRequestRef.current
     const result = await api.getRsvpWorkflow(id)
+    if (request !== workflowRequestRef.current || id !== currentIdRef.current) return
     setWorkflow(result)
   }, [id])
 
   const loadRecipients = useCallback(async () => {
+    const request = ++recipientRequestRef.current
     const result = await api.getRsvpRecipients({
       workflow: id,
       page,
@@ -70,6 +82,7 @@ export default function RsvpWorkflowDetailPage() {
       segment: segmentFilter === 'all' ? undefined : segmentFilter,
       ordering,
     })
+    if (request !== recipientRequestRef.current || id !== currentIdRef.current) return
     setRecipients(result.results)
     setRecipientCount(result.count)
     // Keep only selections that are still visible and still retryable.
@@ -81,9 +94,12 @@ export default function RsvpWorkflowDetailPage() {
   }, [id, ordering, page, responseFilter, search, segmentFilter])
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
-    Promise.all([loadWorkflow(), loadRecipients()]).catch((err) => setError(err instanceof Error ? err.message : 'Unable to load workflow.')).finally(() => setLoading(false))
-  }, [loadWorkflow, loadRecipients])
+    setLoadError(''); setRecipients([]); setSelected(new Set())
+    Promise.all([loadWorkflow(), loadRecipients()]).catch(() => { if (!cancelled) setLoadError('Could not refresh this RSVP setup. Counts may be out of date; recipient results are unavailable.') }).finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true; workflowRequestRef.current += 1; recipientRequestRef.current += 1 }
+  }, [loadWorkflow, loadRecipients, reload])
 
   async function runAction(name: string, action: () => Promise<unknown>) {
     setWorking(name); setError(''); setNotice('')
@@ -175,7 +191,7 @@ export default function RsvpWorkflowDetailPage() {
   }
 
   if (loading && !workflow) return <div className="px-6 py-14 text-sm" style={{ color: 'var(--muted)' }}>Loading RSVP setup…</div>
-  if (!workflow) return <div className="px-6 py-14"><p className="text-sm" style={{ color: 'var(--danger)' }}>{error || 'RSVP setup not found.'}</p><Link href="/admin/rsvp-management" className="mt-4 inline-block text-xs font-semibold" style={{ color: 'var(--brand)' }}>← RSVP management</Link></div>
+  if (!workflow) return <div className="admin-page"><AdminLoadError message={loadError || error || 'RSVP setup not found.'} onRetry={() => setReload((value) => value + 1)} /><Link href="/admin/rsvp-management" className="mt-4 inline-block text-sm font-semibold" style={{ color: 'var(--brand)' }}>← RSVP management</Link></div>
 
   const stats = workflow.stats
   const responded = stats.confirmed + stats.declined
@@ -191,10 +207,10 @@ export default function RsvpWorkflowDetailPage() {
   const hasActiveRecipientFilters = responseFilter !== 'all' || segmentFilter !== 'all' || !!search.trim()
 
   return (
-    <div className="px-6 py-6 lg:px-8 lg:py-7">
+    <div className="admin-page">
       <Link href="/admin/rsvp-management" className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>← RSVP management</Link>
       <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div><div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: 'var(--ink)' }}>{workflow.event_name}</h1><span className="rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize" style={{ background: workflow.status === 'active' ? 'var(--success-bg)' : 'var(--brand-soft)', color: workflow.status === 'active' ? 'var(--success)' : 'var(--brand)' }}>{workflow.status}</span></div><p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>{new Date(workflow.event_date).toLocaleString('en-GB', { dateStyle: 'long', timeStyle: 'short' })}{workflow.response_deadline ? ` · Replies close ${new Date(workflow.response_deadline).toLocaleDateString('en-GB')}` : ''}</p><p className="mt-1 text-[11px]" style={{ color: 'var(--muted)' }}>Invitation template: {workflow.invitation_template_name || 'Not configured'} · Pass template: {workflow.pass_template_name || 'Not configured'}</p></div>
+        <div><div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: 'var(--ink)' }}>{workflow.event_name}</h1><span className="rounded-full px-2.5 py-1 text-[12px] font-semibold capitalize" style={{ background: workflow.status === 'active' ? 'var(--success-bg)' : 'var(--brand-soft)', color: workflow.status === 'active' ? 'var(--success)' : 'var(--brand)' }}>{workflow.status}</span></div><p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>{new Date(workflow.event_date).toLocaleString('en-GB', { dateStyle: 'long', timeStyle: 'short' })}{workflow.response_deadline ? ` · Replies close ${new Date(workflow.response_deadline).toLocaleDateString('en-GB')}` : ''}</p><p className="mt-1 text-[12px]" style={{ color: 'var(--muted)' }}>Invitation template: {workflow.invitation_template_name || 'Not configured'} · Pass template: {workflow.pass_template_name || 'Not configured'}</p></div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => { window.location.href = `${BASE_URL}/rsvp/workflows/${id}/export/?response_status=confirmed` }} className="rounded-lg px-4 py-2 text-xs font-semibold" style={{ border: '1px solid var(--line)', color: 'var(--ink)' }}>Export accepted</button>
           <button onClick={() => { window.location.href = `${BASE_URL}/rsvp/workflows/${id}/export/?delivery_status=failed` }} className="rounded-lg px-4 py-2 text-xs font-semibold" style={{ border: '1px solid rgba(239,68,68,0.35)', color: 'var(--danger)' }}>Export failed</button>
@@ -208,8 +224,10 @@ export default function RsvpWorkflowDetailPage() {
         </div>
       </div>
 
-      {error && <p className="mt-4 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>{error}</p>}
-      {notice && <p className="mt-4 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>{notice}</p>}
+      {error && <p role="alert" className="mt-4 rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>{error}</p>}
+      {notice && <p role="status" className="mt-4 rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>{notice}</p>}
+      {loadError && <AdminLoadError message={loadError} onRetry={() => setReload((value) => value + 1)} />}
+      {loading && <p role="status" className="mt-4 text-sm text-[var(--muted)]">Refreshing guest status…</p>}
       {workflow.status === 'draft' && <div className="mt-5 rounded-[12px] px-4 py-3" style={{ background: 'var(--brand-soft)', border: '1px solid rgba(184,150,62,0.25)' }}><p className="text-sm font-semibold">Ready for review</p><p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>{stats.invited} eligible guests were added. {workflow.invitation_send_at ? `Launch now to activate invitation delivery for ${new Date(workflow.invitation_send_at).toLocaleString('en-GB')}.` : 'No messages have been sent. Launch when the Meta RSVP template is approved and ready.'}{workflow.auto_send_pass && workflow.pass_send_at ? ` Confirmed passes are scheduled for ${new Date(workflow.pass_send_at).toLocaleString('en-GB')}.` : ''}</p></div>}
       {workflow.status === 'active' && workflow.invitation_send_at && new Date(workflow.invitation_send_at) > new Date() && <div className="mt-5 rounded-[12px] px-4 py-3" style={{ background: 'var(--brand-soft)', border: '1px solid rgba(184,150,62,0.25)' }}><p className="text-sm font-semibold">Invitations scheduled</p><p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>RSVP requests will begin sending at {new Date(workflow.invitation_send_at).toLocaleString('en-GB')}.</p></div>}
 
@@ -227,20 +245,24 @@ export default function RsvpWorkflowDetailPage() {
       <div className="mt-5 rounded-[12px] p-5" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
         <div className="flex items-end justify-between gap-4"><div><h2 className="text-sm font-semibold">Response progress</h2><p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>{responded} of {stats.invited} guests have responded</p></div><p className="text-sm font-bold tabular-nums" style={{ color: 'var(--brand)' }}>{stats.response_rate}%</p></div>
         <div className="mt-4 flex h-2.5 overflow-hidden rounded-full" style={{ background: 'var(--line)' }}><span style={{ width: `${stats.invited ? (stats.confirmed / stats.invited) * 100 : 0}%`, background: 'var(--success)' }} /><span style={{ width: `${stats.invited ? (stats.declined / stats.invited) * 100 : 0}%`, background: 'var(--danger)' }} /></div>
-        <div className="mt-3 flex flex-wrap gap-4 text-[11px]" style={{ color: 'var(--muted)' }}><span>● <b style={{ color: 'var(--success)' }}>Confirmed</b> {stats.confirmed}</span><span>● <b style={{ color: 'var(--danger)' }}>Declined</b> {stats.declined}</span><span>● Awaiting {stats.awaiting}</span></div>
+        <div className="mt-3 flex flex-wrap gap-4 text-[12px]" style={{ color: 'var(--muted)' }}><span>● <b style={{ color: 'var(--success)' }}>Confirmed</b> {stats.confirmed}</span><span>● <b style={{ color: 'var(--danger)' }}>Declined</b> {stats.declined}</span><span>● Awaiting {stats.awaiting}</span></div>
       </div>
 
       <div className="mt-5 overflow-hidden rounded-[12px]" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
         {segmentFilter === 'delivery_failed' && <div className="border-b border-red-500/20 bg-red-500/5 px-4 py-3 text-xs" style={{ color: 'var(--danger)' }}><b>Failed-delivery retry flow.</b> Select failed rows below, then retry invitations or passes explicitly. These guests are never included in “Remind awaiting replies.”</div>}
-        <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between" style={{ borderBottom: '1px solid var(--line)' }}><div><h2 className="text-sm font-semibold">Recipients</h2><p className="mt-0.5 text-xs" style={{ color: 'var(--muted)' }}>{recipientCount} matching guests</p></div><div className="flex flex-wrap gap-2"><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search guest…" className="min-w-[170px] flex-1 rounded-lg px-3 py-2 text-xs focus:outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--line)', color: 'var(--ink)' }} /><select value={responseFilter} onChange={(e) => { setResponseFilter(e.target.value as 'all' | RsvpResponseStatus); setPage(1) }} className="rounded-lg px-3 py-2 text-xs focus:outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--line)', color: 'var(--ink)' }}><option value="all">All responses</option><option value="awaiting">Awaiting</option><option value="confirmed">Confirmed</option><option value="declined">Declined</option></select><select value={segmentFilter} onChange={(e) => { setSegmentFilter(e.target.value as 'all' | RsvpRecipientSegment); setPage(1) }} className="rounded-lg px-3 py-2 text-xs focus:outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--line)', color: 'var(--ink)' }}><option value="all">All delivery states</option>{(Object.keys(SEGMENT_LABEL) as RsvpRecipientSegment[]).map((segment) => <option key={segment} value={segment}>{SEGMENT_LABEL[segment]}</option>)}</select><select value={ordering} onChange={(e) => { setOrdering(e.target.value as RsvpRecipientOrdering); setPage(1) }} aria-label="Sort recipients" className="rounded-lg px-3 py-2 text-xs focus:outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--line)', color: 'var(--ink)' }}><option value="name">Name: A–Z</option><option value="-name">Name: Z–A</option><option value="-sent">Invitation sent: newest</option><option value="sent">Invitation sent: oldest</option><option value="-confirmed">Confirmed: newest</option><option value="confirmed">Confirmed: oldest</option><option value="-last_message">Last message: newest</option><option value="last_message">Last message: oldest</option></select><button disabled={!hasActiveRecipientFilters} onClick={exportFilteredRecipients} className="rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ border: '1px solid var(--line)', color: 'var(--brand)' }}>Export filtered ({recipientCount})</button></div></div>
+        <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between" style={{ borderBottom: '1px solid var(--line)' }}><div><h2 className="text-sm font-semibold">Recipients</h2><p className="mt-0.5 text-xs" style={{ color: 'var(--muted)' }}>{recipientCount} matching guests</p></div><div className="flex flex-wrap gap-2"><input aria-label="Search RSVP recipients" disabled={!!working} value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search guest…" className="min-w-0 flex-1 rounded-lg px-3 py-2 text-xs focus:outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--line)', color: 'var(--ink)' }} /><select aria-label="Filter RSVP responses" disabled={!!working} value={responseFilter} onChange={(e) => { setResponseFilter(e.target.value as 'all' | RsvpResponseStatus); setPage(1) }} className="rounded-lg px-3 py-2 text-xs focus:outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--line)', color: 'var(--ink)' }}><option value="all">All responses</option><option value="awaiting">Awaiting</option><option value="confirmed">Confirmed</option><option value="declined">Declined</option></select><select aria-label="Filter delivery states" disabled={!!working} value={segmentFilter} onChange={(e) => { setSegmentFilter(e.target.value as 'all' | RsvpRecipientSegment); setPage(1) }} className="rounded-lg px-3 py-2 text-xs focus:outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--line)', color: 'var(--ink)' }}><option value="all">All delivery states</option>{(Object.keys(SEGMENT_LABEL) as RsvpRecipientSegment[]).map((segment) => <option key={segment} value={segment}>{SEGMENT_LABEL[segment]}</option>)}</select><select disabled={!!working} value={ordering} onChange={(e) => { setOrdering(e.target.value as RsvpRecipientOrdering); setPage(1) }} aria-label="Sort recipients" className="rounded-lg px-3 py-2 text-xs focus:outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--line)', color: 'var(--ink)' }}><option value="name">Name: A–Z</option><option value="-name">Name: Z–A</option><option value="-sent">Invitation sent: newest</option><option value="sent">Invitation sent: oldest</option><option value="-confirmed">Confirmed: newest</option><option value="confirmed">Confirmed: oldest</option><option value="-last_message">Last message: newest</option><option value="last_message">Last message: oldest</option></select><button disabled={!hasActiveRecipientFilters} onClick={exportFilteredRecipients} className="rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ border: '1px solid var(--line)', color: 'var(--brand)' }}>Export filtered ({recipientCount})</button></div></div>
         {selected.size > 0 && <div className="flex flex-wrap items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--line)', background: 'var(--brand-soft)' }}>
           <span className="text-xs font-semibold" style={{ color: 'var(--ink)' }}>{selected.size} selected</span>
           <button disabled={!!working || invitationRetryIds.length === 0} onClick={() => bulkRetry('invitation', invitationRetryIds)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" style={{ background: 'var(--brand)' }}>{working === 'bulk-invitation' ? 'Queuing…' : `Retry invitations (${invitationRetryIds.length})`}</button>
           <button disabled={!!working || passRetryIds.length === 0} onClick={() => bulkRetry('pass', passRetryIds)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" style={{ background: 'var(--brand)' }}>{working === 'bulk-pass' ? 'Queuing…' : `Retry passes (${passRetryIds.length})`}</button>
           <button disabled={!!working} onClick={() => setSelected(new Set())} className="rounded-lg px-3 py-1.5 text-xs font-semibold" style={{ border: '1px solid var(--line)', color: 'var(--muted)' }}>Clear selection</button>
         </div>}
-        <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead><tr style={{ borderBottom: '1px solid var(--line)', color: 'var(--muted)' }}><th className="w-10 px-4 py-3"><input type="checkbox" aria-label="Select all failed deliveries on this page" disabled={selectableRows.length === 0} checked={allSelectableSelected} onChange={() => setSelected(allSelectableSelected ? new Set() : new Set(selectableRows.map((recipient) => recipient.id)))} /></th><th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider">Guest</th><th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider">Response</th><th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider">Invitation</th><th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider">Pass</th><th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider">Responded</th><th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider">Last message</th><th className="px-4 py-3"></th></tr></thead><tbody>{recipients.length === 0 ? <tr><td colSpan={8} className="px-4 py-12 text-center text-xs" style={{ color: 'var(--muted)' }}>No recipients match these filters.</td></tr> : recipients.map((recipient) => <RecipientRow key={recipient.id} recipient={recipient} working={working} selected={selected.has(recipient.id)} onToggle={() => toggleSelected(recipient.id)} retry={(kind) => retrySingle(kind, recipient.id)} />)}</tbody></table></div>
-        {totalPages > 1 && <div className="flex items-center justify-between px-4 py-3 text-xs" style={{ borderTop: '1px solid var(--line)', color: 'var(--muted)' }}><button disabled={page === 1} onClick={() => setPage((current) => current - 1)} className="rounded px-3 py-1.5 disabled:opacity-30" style={{ border: '1px solid var(--line)' }}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page === totalPages} onClick={() => setPage((current) => current + 1)} className="rounded px-3 py-1.5 disabled:opacity-30" style={{ border: '1px solid var(--line)' }}>Next →</button></div>}
+        {loading ? <p role="status" className="p-6 text-sm text-[var(--muted)]">Loading recipients…</p> : loadError ? <p className="p-6 text-sm text-[var(--muted)]">Recipient results are unavailable. Use Retry above.</p> : <>
+        <div className="md:hidden">
+          {recipients.length === 0 ? <p className="p-6 text-sm text-[var(--muted)]">No recipients match these filters.</p> : recipients.map((recipient) => <RecipientCard key={recipient.id} recipient={recipient} working={working} selected={selected.has(recipient.id)} onToggle={() => toggleSelected(recipient.id)} retry={(kind) => retrySingle(kind, recipient.id)} />)}
+        </div>
+        <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[900px] text-sm"><thead><tr style={{ borderBottom: '1px solid var(--line)', color: 'var(--muted)' }}><th className="w-10 px-4 py-3"><input type="checkbox" aria-label="Select all failed deliveries on this page" disabled={selectableRows.length === 0} checked={allSelectableSelected} onChange={() => setSelected(allSelectableSelected ? new Set() : new Set(selectableRows.map((recipient) => recipient.id)))} /></th><th className="px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-wider">Guest</th><th className="px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-wider">Response</th><th className="px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-wider">Invitation</th><th className="px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-wider">Pass</th><th className="px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-wider">Responded</th><th className="px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-wider">Last message</th><th className="px-4 py-3"></th></tr></thead><tbody>{recipients.length === 0 ? <tr><td colSpan={8} className="px-4 py-12 text-center text-xs" style={{ color: 'var(--muted)' }}>No recipients match these filters.</td></tr> : recipients.map((recipient) => <RecipientRow key={recipient.id} recipient={recipient} working={working} selected={selected.has(recipient.id)} onToggle={() => toggleSelected(recipient.id)} retry={(kind) => retrySingle(kind, recipient.id)} />)}</tbody></table></div></>}
+        {!loading && !loadError && totalPages > 1 && <div className="flex items-center justify-between px-4 py-3 text-xs" style={{ borderTop: '1px solid var(--line)', color: 'var(--muted)' }}><button disabled={page === 1 || !!working} onClick={() => setPage((current) => current - 1)} className="rounded px-3 py-1.5 disabled:opacity-30" style={{ border: '1px solid var(--line)' }}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page === totalPages || !!working} onClick={() => setPage((current) => current + 1)} className="rounded px-3 py-1.5 disabled:opacity-30" style={{ border: '1px solid var(--line)' }}>Next →</button></div>}
       </div>
     </div>
   )
@@ -250,11 +272,11 @@ function deliveryCell(status: string, error: string, autoRetries: number, templa
   const failed = status === 'failed'
   return <>
     <span className="text-xs capitalize" style={{ color: failed ? 'var(--danger)' : 'var(--muted)' }}>{status.replace('_', ' ')}</span>
-    {sentAt && ['sent', 'delivered', 'read'].includes(status) && <p className="mt-0.5 text-[10px]" style={{ color: 'var(--muted)' }}>Sent {new Date(sentAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</p>}
-    {status === 'queued' && attemptedAt && <p className="mt-0.5 text-[10px]" style={{ color: 'var(--muted)' }}>Queued {new Date(attemptedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })} · awaiting worker</p>}
-    {failed && error && <p className="mt-1 max-w-[240px] text-[10px] leading-4" style={{ color: 'var(--danger)' }}>{error}</p>}
-    {failed && autoRetries > 0 && <p className="mt-0.5 text-[10px]" style={{ color: 'var(--muted)' }}>Auto-retried {autoRetries}×</p>}
-    {failed && templateName && <p className="mt-0.5 max-w-[240px] text-[10px]" style={{ color: 'var(--muted)' }}>Last template: {templateName}{attemptedAt ? ` · ${new Date(attemptedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}</p>}
+    {sentAt && ['sent', 'delivered', 'read'].includes(status) && <p className="mt-0.5 text-xs" style={{ color: 'var(--muted)' }}>Sent {new Date(sentAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</p>}
+    {status === 'queued' && attemptedAt && <p className="mt-0.5 text-xs" style={{ color: 'var(--muted)' }}>Queued {new Date(attemptedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })} · awaiting delivery</p>}
+    {failed && error && <p className="mt-1 max-w-[240px] text-xs leading-4" style={{ color: 'var(--danger)' }}>{error}</p>}
+    {failed && autoRetries > 0 && <p className="mt-0.5 text-xs" style={{ color: 'var(--muted)' }}>Auto-retried {autoRetries}×</p>}
+    {failed && templateName && <p className="mt-0.5 max-w-[240px] text-xs" style={{ color: 'var(--muted)' }}>Last template: {templateName}{attemptedAt ? ` · ${new Date(attemptedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}</p>}
   </>
 }
 
@@ -263,5 +285,24 @@ function RecipientRow({ recipient, retry, working, selected, onToggle }: { recip
   const invitationError = recipient.invitation_error || (recipient.pass_status !== 'failed' ? recipient.last_error : '')
   const passError = recipient.pass_error || (recipient.invitation_status !== 'failed' ? recipient.last_error : '')
   const selectable = recipient.invitation_status === 'failed' || recipient.pass_status === 'failed'
-  return <tr style={{ borderBottom: '1px solid var(--line)' }}><td className="w-10 px-4 py-3"><input type="checkbox" aria-label={`Select ${recipient.guest_name}`} disabled={!selectable} checked={selected} onChange={onToggle} /></td><td className="px-4 py-3"><p className="font-semibold">{recipient.guest_name}</p><p className="mt-0.5 text-[11px]" style={{ color: 'var(--muted)' }}>{recipient.ticket_type || 'Guest'}{recipient.table_number ? ` · Table ${recipient.table_number}` : ''}{recipient.is_plus_one ? ` · Plus one of ${recipient.primary_guest_name}` : recipient.plus_one_attending ? ' · Bringing a plus one' : ''}{recipient.aso_ebi_requested ? ` · Aso Ebi ${recipient.aso_ebi_quantity} yd` : ''}</p></td><td className="px-4 py-3"><span className="text-xs font-semibold" style={{ color: responseColor }}>{RESPONSE_LABEL[recipient.response_status]}</span></td><td className="px-4 py-3">{deliveryCell(recipient.invitation_status, invitationError, recipient.invitation_auto_retries, recipient.invitation_last_template_name, recipient.invitation_queued_at, recipient.invitation_sent_at)}</td><td className="px-4 py-3">{deliveryCell(recipient.pass_status, passError, recipient.pass_auto_retries, recipient.pass_last_template_name, recipient.pass_queued_at, recipient.pass_sent_at)}</td><td className="px-4 py-3 text-xs" style={{ color: 'var(--muted)' }}>{recipient.responded_at ? new Date(recipient.responded_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td><td className="px-4 py-3 text-xs" style={{ color: 'var(--muted)' }}>{recipient.last_message_sent_at ? new Date(recipient.last_message_sent_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td><td className="px-4 py-3 text-right">{recipient.invitation_status === 'failed' && <button disabled={!!working} onClick={() => retry('invitation')} className="text-xs font-semibold disabled:opacity-40" style={{ color: 'var(--brand)' }}>{working === `invitation-${recipient.id}` ? 'Queuing…' : 'Retry invitation'}</button>}{recipient.pass_status === 'failed' && <button disabled={!!working} onClick={() => retry('pass')} className="text-xs font-semibold disabled:opacity-40" style={{ color: 'var(--brand)' }}>{working === `pass-${recipient.id}` ? 'Queuing…' : 'Retry pass'}</button>}</td></tr>
+  return <tr style={{ borderBottom: '1px solid var(--line)' }}><td className="w-10 px-4 py-3"><input type="checkbox" aria-label={`Select ${recipient.guest_name}`} disabled={!selectable} checked={selected} onChange={onToggle} /></td><td className="px-4 py-3"><p className="font-semibold">{recipient.guest_name}</p><p className="mt-0.5 text-[12px]" style={{ color: 'var(--muted)' }}>{recipient.ticket_type || 'Guest'}{recipient.table_number ? ` · Table ${recipient.table_number}` : ''}{recipient.is_plus_one ? ` · Plus one of ${recipient.primary_guest_name}` : recipient.plus_one_attending ? ' · Bringing a plus one' : ''}{recipient.aso_ebi_requested ? ` · Aso Ebi ${recipient.aso_ebi_quantity} yd` : ''}</p></td><td className="px-4 py-3"><span className="text-xs font-semibold" style={{ color: responseColor }}>{RESPONSE_LABEL[recipient.response_status]}</span></td><td className="px-4 py-3">{deliveryCell(recipient.invitation_status, invitationError, recipient.invitation_auto_retries, recipient.invitation_last_template_name, recipient.invitation_queued_at, recipient.invitation_sent_at)}</td><td className="px-4 py-3">{deliveryCell(recipient.pass_status, passError, recipient.pass_auto_retries, recipient.pass_last_template_name, recipient.pass_queued_at, recipient.pass_sent_at)}</td><td className="px-4 py-3 text-xs" style={{ color: 'var(--muted)' }}>{recipient.responded_at ? new Date(recipient.responded_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td><td className="px-4 py-3 text-xs" style={{ color: 'var(--muted)' }}>{recipient.last_message_sent_at ? new Date(recipient.last_message_sent_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td><td className="px-4 py-3 text-right">{recipient.invitation_status === 'failed' && <button disabled={!!working} onClick={() => retry('invitation')} className="text-xs font-semibold disabled:opacity-40" style={{ color: 'var(--brand)' }}>{working === `invitation-${recipient.id}` ? 'Queuing…' : 'Retry invitation'}</button>}{recipient.pass_status === 'failed' && <button disabled={!!working} onClick={() => retry('pass')} className="text-xs font-semibold disabled:opacity-40" style={{ color: 'var(--brand)' }}>{working === `pass-${recipient.id}` ? 'Queuing…' : 'Retry pass'}</button>}</td></tr>
+}
+
+function RecipientCard({ recipient, retry, working, selected, onToggle }: { recipient: RsvpRecipient; retry: (kind: 'invitation' | 'pass') => void; working: string; selected: boolean; onToggle: () => void }) {
+  const selectable = recipient.invitation_status === 'failed' || recipient.pass_status === 'failed'
+  return <article className="border-b border-[var(--line)] p-4">
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0"><h3 className="break-words font-semibold">{recipient.guest_name}</h3><p className="mt-1 text-sm text-[var(--muted)]">{recipient.ticket_type || 'Guest'}{recipient.table_number ? ` · Table ${recipient.table_number}` : ''}</p></div>
+      {selectable && <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select ${recipient.guest_name} for retry`} />Select</label>}
+    </div>
+    <p className="mt-3 text-sm font-semibold">Response: {RESPONSE_LABEL[recipient.response_status]}</p>
+    <div className="mt-3 grid gap-4 text-sm">
+      <div><h4 className="font-semibold">Invitation</h4>{deliveryCell(recipient.invitation_status, recipient.invitation_error || (recipient.pass_status !== 'failed' ? recipient.last_error : ''), recipient.invitation_auto_retries, recipient.invitation_last_template_name, recipient.invitation_queued_at, recipient.invitation_sent_at)}</div>
+      <div><h4 className="font-semibold">Pass</h4>{deliveryCell(recipient.pass_status, recipient.pass_error || (recipient.invitation_status !== 'failed' ? recipient.last_error : ''), recipient.pass_auto_retries, recipient.pass_last_template_name, recipient.pass_queued_at, recipient.pass_sent_at)}</div>
+    </div>
+    <div className="mt-4 flex flex-wrap gap-2">
+      {recipient.invitation_status === 'failed' && <button type="button" disabled={!!working} onClick={() => retry('invitation')} className="admin-secondary-action">{working === `invitation-${recipient.id}` ? 'Queuing…' : 'Retry invitation'}</button>}
+      {recipient.pass_status === 'failed' && <button type="button" disabled={!!working} onClick={() => retry('pass')} className="admin-secondary-action">{working === `pass-${recipient.id}` ? 'Queuing…' : 'Retry pass'}</button>}
+    </div>
+  </article>
 }

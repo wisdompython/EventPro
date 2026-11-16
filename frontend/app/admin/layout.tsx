@@ -15,6 +15,7 @@ const PAGE_TITLES: Record<string, string> = {
   'guest-messages': 'Guest messages', 'follow-ups': 'Follow-ups', 'rsvp-management': 'RSVP management', 'pass-studio': 'Pass studio', 'seating-plan': 'Event planner',
   'crew-access': 'Crew access', 'company-profile': 'Company profile', domains: 'Domains', settings: 'Messaging settings', playbook: 'Playbook', profile: 'My account',
   'message-library': 'Message library', 'delivery-monitor': 'Delivery monitor', 'list-import': 'List import',
+  'rsvp-customization': 'RSVP customization', preferences: 'Preferences',
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -46,6 +47,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   function toggleSidebar() {
+    document.getElementById('admin-sidebar-toggle')?.focus()
     setSidebarClosed((current) => {
       const next = !current
       window.localStorage.setItem('event-pro-sidebar-closed', String(next))
@@ -63,7 +65,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return (
     <TourProvider>
       <div className={`admin-shell${sidebarClosed ? ' is-sidebar-closed' : ''}${pendingNavigation ? ' is-navigating' : ''}`}>
-        <NavSidebar user={user} logout={logout} onCollapse={toggleSidebar} pendingHref={pendingNavigation?.href ?? null} onNavigate={beginNavigation} />
+        <NavSidebar user={user} logout={logout} closed={sidebarClosed} onCollapse={toggleSidebar} pendingHref={pendingNavigation?.href ?? null} onNavigate={beginNavigation} />
         <MobileNav user={user} logout={logout} open={mobileOpen} onClose={() => setMobileOpen(false)} pendingHref={pendingNavigation?.href ?? null} onNavigate={beginNavigation} />
         <div className="admin-shell__workspace">
           {pendingNavigation && (
@@ -79,6 +81,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </button>
               <button
                 type="button"
+                id="admin-sidebar-toggle"
                 onClick={toggleSidebar}
                 className="admin-desktop-menu-button"
                 aria-label={sidebarClosed ? 'Open navigation' : 'Hide navigation'}
@@ -94,13 +97,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <div><p>Event Pro / {user.active_organization?.name}</p><h1>{title}</h1></div>
             </div>
             <div className="admin-topbar__actions">
-              <Link href="/admin/guestbook/search" className="admin-search-link" onClick={() => beginNavigation('/admin/guestbook/search', 'Guest search')}>
+              {can('check_in_staff') && <Link href="/admin/guestbook/search" className="admin-search-link" onClick={() => beginNavigation('/admin/guestbook/search', 'Guest search')}>
                 <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-                <span>Find a guest</span><kbd>⌘ K</kbd>
-              </Link>
-              <Link href="/admin/follow-ups" className="admin-icon-button" aria-label="View follow-ups" onClick={() => beginNavigation('/admin/follow-ups', 'Follow-ups')}>
-                <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 6-3 7-3 7h18s-3-1-3-7M10 20h4"/></svg><i />
-              </Link>
+                <span>Find a guest</span>
+              </Link>}
+              {can('check_in_staff') && <Link href="/admin/follow-ups" className="admin-icon-button" aria-label="View follow-ups" onClick={() => beginNavigation('/admin/follow-ups', 'Follow-ups')}>
+                <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 6-3 7-3 7h18s-3-1-3-7M10 20h4"/></svg>
+              </Link>}
               {can('event_manager') && <Link href="/admin/event-management/add" className="admin-create-button" onClick={() => beginNavigation('/admin/event-management/add', 'New event')}><span>＋</span> New event</Link>}
             </div>
           </header>

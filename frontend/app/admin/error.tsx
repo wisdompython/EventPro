@@ -19,7 +19,7 @@ export default function AdminError({ error, reset }: { error: Error & { digest?:
         This page crashed unexpectedly. Your data is safe — try again or refresh the page.
       </p>
       {process.env.NODE_ENV === 'development' && (
-        <pre className="mb-6 max-w-lg overflow-auto rounded-[8px] px-4 py-3 text-[11px] text-left"
+        <pre className="mb-6 max-w-lg overflow-auto rounded-[8px] px-4 py-3 text-[12px] text-left"
           style={{ background: 'rgba(239,68,68,0.06)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}>
           {error.message}
         </pre>

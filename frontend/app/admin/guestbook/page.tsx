@@ -8,6 +8,8 @@ import ExportDropdown from '@/components/ExportDropdown'
 import { GuestFilterBar, GuestSortKey } from '@/components/guests/GuestFilterBar'
 import { GuestTable } from '@/components/guests/GuestTable'
 import { DownloadAssetsButton } from '@/components/guests/DownloadAssetsButton'
+import { AdminLoadError } from '@/components/admin/AdminLoadError'
+import { ConfirmDialog, type ConfirmRequest } from '@/components/admin/ConfirmDialog'
 
 type FilterToken = { key: string; value: string }
 
@@ -29,7 +31,8 @@ function parseTokens(input: string): { tokens: FilterToken[]; freeText: string }
 }
 
 export default function GuestsPage() {
-  const { isSuperAdmin } = useAuth()
+  const { isSuperAdmin, can } = useAuth()
+  const canManage = can('event_manager')
   const [events, setEvents]             = useState<Event[]>([])
   const [eventsLoading, setEventsLoading] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
@@ -48,6 +51,11 @@ export default function GuestsPage() {
   const [deleteError, setDeleteError]   = useState('')
   const [regeneratingAll, setRegeneratingAll] = useState(false)
   const [regenToast, setRegenToast]     = useState('')
+  const [eventsError, setEventsError] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [reloadEvents, setReloadEvents] = useState(0)
+  const [reloadGuests, setReloadGuests] = useState(0)
+  const [confirmation, setConfirmation] = useState<ConfirmRequest | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const PAGE_SIZE = 50
@@ -62,19 +70,32 @@ export default function GuestsPage() {
   const rsvpToken = tokens.find((t) => t.key === 'rsvp')?.value ?? ''
 
   useEffect(() => {
+    let cancelled = false
+    setEventsLoading(true); setEventsError('')
     api.getEvents().then((items) => {
+      if (cancelled) return
       setEvents(items)
       const requestedEventId = Number(new URLSearchParams(window.location.search).get('event'))
       if (requestedEventId) setSelectedEvent(items.find((item) => item.id === requestedEventId) ?? null)
-    }).catch(console.error).finally(() => setEventsLoading(false))
-  }, [])
+    }).catch(() => { if (!cancelled) setEventsError('Could not load events. Please retry.') }).finally(() => { if (!cancelled) setEventsLoading(false) })
+    return () => { cancelled = true }
+  }, [reloadEvents])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (selectedEvent) url.searchParams.set('event', String(selectedEvent.id))
+    else url.searchParams.delete('event')
+    if (!eventsLoading) window.history.replaceState(window.history.state, '', url)
+  }, [selectedEvent, eventsLoading])
 
   // reset to page 1 when filters or event changes
   useEffect(() => { setPage(1) }, [selectedEvent?.id, searchTerm, statusToken, ticketToken, waToken, duplicatesToken, rsvpToken, sort, registeredFrom, registeredTo])
 
   useEffect(() => {
     if (!selectedEvent) return
+    let cancelled = false
     setLoading(true)
+    setLoadError(''); setGuests([]); setStats(null)
     setSelected(new Set())
     const params: Record<string, string> = { event: String(selectedEvent.id), page: String(page) }
     if (searchTerm)  params.search      = searchTerm
@@ -88,10 +109,11 @@ export default function GuestsPage() {
     if (registeredFrom) params.registered_after  = registeredFrom
     if (registeredTo)   params.registered_before = registeredTo
     api.getGuests(params)
-      .then((data) => { setGuests(data.results); setCount(data.count); setStats(data.stats ?? null) })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [selectedEvent, searchTerm, statusToken, ticketToken, waToken, duplicatesToken, rsvpToken, sort, registeredFrom, registeredTo, page])
+      .then((data) => { if (!cancelled) { setGuests(data.results); setCount(data.count); setStats(data.stats ?? null) } })
+      .catch(() => { if (!cancelled) setLoadError('Could not load this guest list. Please retry.') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [selectedEvent, searchTerm, statusToken, ticketToken, waToken, duplicatesToken, rsvpToken, sort, registeredFrom, registeredTo, page, reloadGuests])
 
   const filtered = guests
 
@@ -103,6 +125,7 @@ export default function GuestsPage() {
     else setSelected(new Set(filtered.map((g) => g.id)))
   }
   async function handleDelete(id: string, name: string) {
+    if (!canManage) return
     if (!confirm(`Delete ${name}?\n\nTheir RSVP record, response link, QR code, and pass will also be removed. This cannot be undone.`)) return
     const guest = guests.find((item) => item.id === id)
     setDeleting(id)
@@ -141,7 +164,7 @@ export default function GuestsPage() {
   }
 
   async function handleBulkDelete() {
-    if (selected.size === 0) return
+    if (!canManage || selected.size === 0) return
     if (!confirm(`Delete ${selected.size} selected guest${selected.size !== 1 ? 's' : ''}?\n\nTheir RSVP records, response links, QR codes, and passes will also be removed. This cannot be undone.`)) return
     setDeleting('bulk')
     setDeleteError('')
@@ -150,29 +173,44 @@ export default function GuestsPage() {
       setGuests((prev) => prev.filter((g) => !selected.has(g.id)))
       setCount((c) => c - deleted)
       setSelected(new Set())
+      setReloadGuests((value) => value + 1)
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : 'Failed to delete guests.')
     } finally { setDeleting(null) }
   }
 
   async function handleDeleteAll() {
-    if (!selectedEvent) return
-    if (!confirm(`Delete ALL ${count} guests from "${selectedEvent.name}"?\n\nTheir RSVP records, responses, links, QR codes, and passes will also be removed. The RSVP setup itself will remain. This cannot be undone.`)) return
-    setDeleting('all')
+    if (!selectedEvent || !canManage || deleting) return
+    const event = selectedEvent
+    setDeleting('checking-scope')
     setDeleteError('')
     try {
-      await api.deleteAllGuests(selectedEvent.id)
-      setGuests([])
-      setCount(0)
-      setSelected(new Set())
+      const overview = await api.getGuests({ event: String(event.id), page_size: '1' })
+      setConfirmation({
+        title: `Delete the entire guest list for ${event.name}?`,
+        body: `This deletes all ${overview.count} guests in this event, including guests hidden by your current filters. Their RSVP records, responses, links, QR codes, and passes will also be removed. The RSVP setup remains. This cannot be undone.`,
+        confirmLabel: `Delete all ${overview.count} guests`,
+        onConfirm: () => { void clearEntireList(event.id) },
+      })
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Failed to clear guests.')
+      setDeleteError(err instanceof Error ? err.message : 'Could not check the full guest-list size. Please retry.')
     } finally { setDeleting(null) }
   }
 
+  async function clearEntireList(eventId: number) {
+    setDeleting('all'); setDeleteError('')
+    try {
+      await api.deleteAllGuests(eventId)
+      setSelected(new Set())
+      setReloadEvents((value) => value + 1)
+      setReloadGuests((value) => value + 1)
+    } catch (err) { setDeleteError(err instanceof Error ? err.message : 'Failed to clear guests.') }
+    finally { setDeleting(null) }
+  }
+
   async function handleRegenerateAll() {
-    if (!selectedEvent) return
-    if (!confirm(`Regenerate passes for all ${count} guests in "${selectedEvent.name}"? This may take a few minutes.`)) return
+    if (!selectedEvent || !canManage) return
+    if (!confirm(`Regenerate passes for the entire guest list in "${selectedEvent.name}", including guests hidden by filters? This may take a few minutes.`)) return
     setRegeneratingAll(true)
     try {
       const { queued } = await api.bulkRegenerateAssets(selectedEvent.id)
@@ -192,7 +230,7 @@ export default function GuestsPage() {
       <div className="admin-legacy-workspace flex h-screen flex-col overflow-hidden" style={{ background: 'var(--bg)' }}>
         <div className="flex flex-shrink-0 items-center justify-between px-6 py-4"
           style={{ borderBottom: '1px solid var(--line)', background: 'var(--sidebar)' }}>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-xl font-bold" style={{ color: 'var(--ink)' }}>Guestbook</h1>
             <Link href="/admin/guestbook/search" data-tour="guests-search-link"
               className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-full transition hover:opacity-80"
@@ -210,12 +248,12 @@ export default function GuestsPage() {
 
           {eventsLoading ? (
             <p className="text-sm" style={{ color: 'var(--muted)' }}>Loading events…</p>
-          ) : events.length === 0 ? (
+          ) : eventsError ? <AdminLoadError message={eventsError} onRetry={() => setReloadEvents((value) => value + 1)} /> : events.length === 0 ? (
             <div className="text-center py-16">
               <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>No events yet.</p>
-              <Link href="/admin/event-management/add" className="text-sm font-semibold hover:underline" style={{ color: 'var(--brand)' }}>
+              {canManage && <Link href="/admin/event-management/add" className="text-sm font-semibold hover:underline" style={{ color: 'var(--brand)' }}>
                 Create your first event →
-              </Link>
+              </Link>}
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -226,7 +264,7 @@ export default function GuestsPage() {
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <p className="text-sm font-semibold leading-snug" style={{ color: 'var(--ink)' }}>{ev.name}</p>
                     {ev.is_ended && (
-                      <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                      <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[12px] font-semibold"
                         style={{ background: 'rgba(156,163,175,0.15)', color: 'var(--muted)' }}>Ended</span>
                     )}
                   </div>
@@ -257,82 +295,49 @@ export default function GuestsPage() {
       )}
       <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4"
         style={{ borderBottom: '1px solid var(--line)', background: 'var(--sidebar)' }}>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
           <button onClick={() => { setSelectedEvent(null); setQuery(''); setSort(''); setRegisteredFrom(''); setRegisteredTo(''); setGuests([]); setCount(0); setStats(null) }}
             className="text-xs font-semibold transition hover:opacity-70"
             style={{ color: 'var(--muted)' }}>
-            ← Event management
+            ← Choose event
           </button>
           <span style={{ color: 'var(--line)' }}>/</span>
-          <div className="flex items-baseline gap-3">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-3">
             <h1 className="text-xl font-bold" style={{ color: 'var(--ink)' }}>
               {selectedEvent.name}
-              <span className="ml-2 text-base font-normal" style={{ color: 'var(--muted)' }}>• {count}</span>
+              <span className="ml-2 text-base font-normal" style={{ color: 'var(--muted)' }}>• {loading ? '…' : loadError ? '—' : count}</span>
             </h1>
             <p className="text-xs" style={{ color: 'var(--muted)' }}>
-              {checkedIn} checked in · {stats?.has_rsvp
+              {loadError ? 'Status unavailable' : loading ? 'Loading guest status…' : <>{checkedIn} checked in · {stats?.has_rsvp
                 ? `${stats.confirmed} confirmed · ${stats.awaiting} awaiting · ${stats.declined} declined${stats.delivery_failed ? ` · ${stats.delivery_failed} failed` : ''}`
-                : `${pending} pending`}
+                : `${pending} pending`}</>}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {selected.size > 0 ? (
-            <button onClick={handleBulkDelete} disabled={deleting === 'bulk'}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition hover:opacity-90 disabled:opacity-60"
-              style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
-              <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/>
-              </svg>
-              {deleting === 'bulk' ? 'Deleting…' : `Delete ${selected.size} selected`}
-            </button>
-          ) : (
-            <>
-              <button onClick={handleDeleteAll} disabled={deleting === 'all' || count === 0}
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition hover:opacity-90 disabled:opacity-40"
-                style={{ border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
-                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                </svg>
-                {deleting === 'all' ? 'Clearing…' : 'Clear all'}
-              </button>
-              <button onClick={handleRegenerateAll} disabled={regeneratingAll || count === 0}
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition hover:opacity-90 disabled:opacity-40"
-                style={{ border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--panel-2)' }}
-                title="Regenerate QR codes and pass images for all guests">
-                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12a7.5 7.5 0 0 1 7.5-7.5 7.5 7.5 0 0 1 5.196 2.087M19.5 12a7.5 7.5 0 0 1-7.5 7.5 7.5 7.5 0 0 1-5.196-2.087M4.5 12H2m17.5 0H22M4.5 8l-2-2m19 6 2 2" />
-                </svg>
-                {regeneratingAll ? 'Queuing…' : 'Regen passes'}
-              </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {canManage && selected.size > 0 && <button onClick={handleBulkDelete} disabled={!!deleting} className="admin-danger-action">{deleting === 'bulk' ? 'Deleting…' : `Delete ${selected.size} selected guests`}</button>}
+          {canManage && <Link href={`/admin/guestbook/add?event=${selectedEvent.id}`} data-tour="guests-add-button" className="admin-primary-action">＋ Add guest</Link>}
+          <details className="admin-action-menu">
+            <summary className="admin-secondary-action">Event actions</summary>
+            <div className="admin-action-menu__panel">
               <DownloadAssetsButton eventId={selectedEvent.id} eventName={selectedEvent.name} />
               <ExportDropdown events={[selectedEvent]} />
-              <Link href={`/admin/list-import?event=${selectedEvent.id}`} data-tour="guests-bulk-upload-button"
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition hover:opacity-90"
-                style={{ border: '1px solid var(--line)', color: 'var(--ink)', background: 'var(--panel-2)' }}>
-                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
-                </svg>
-                Upload / replace list
-              </Link>
-              <Link href={`/admin/guestbook/add?event=${selectedEvent.id}`} data-tour="guests-add-button"
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
-                style={{ background: 'var(--brand)' }}>
-                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <path d="M12 5v14M5 12h14"/>
-                </svg>
-                Add guest
-              </Link>
-            </>
-          )}
+              {canManage && <>
+                <Link href={`/admin/list-import?event=${selectedEvent.id}`} data-tour="guests-bulk-upload-button" className="admin-secondary-action">Import guest list</Link>
+                <button onClick={handleRegenerateAll} disabled={regeneratingAll || loading || !!loadError} className="admin-secondary-action">{regeneratingAll ? 'Queuing…' : 'Regenerate all passes'}</button>
+                <button onClick={handleDeleteAll} disabled={!!deleting || loading || !!loadError} className="admin-danger-action">{deleting === 'all' ? 'Deleting…' : deleting === 'checking-scope' ? 'Checking list size…' : 'Delete entire event guest list'}</button>
+              </>}
+            </div>
+          </details>
         </div>
       </div>
+      {confirmation && <ConfirmDialog {...confirmation} onCancel={() => setConfirmation(null)} />}
 
       {deleteError && (
-        <div className="flex items-center justify-between px-5 py-2 text-xs"
-          style={{ background: 'rgba(239,68,68,0.1)', borderBottom: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}>
+        <div role="alert" className="flex items-center justify-between px-5 py-2 text-xs"
+          style={{ background: 'rgba(239,68,68,0.1)', borderBottom: '1px solid rgba(239,68,68,0.2)', color: 'var(--danger)' }}>
           {deleteError}
-          <button onClick={() => setDeleteError('')} className="ml-4 opacity-70 hover:opacity-100">✕</button>
+          <button aria-label="Dismiss error" onClick={() => setDeleteError('')} className="ml-4 opacity-70 hover:opacity-100">✕</button>
         </div>
       )}
 
@@ -340,6 +345,7 @@ export default function GuestsPage() {
         tokens={tokens} freeText={freeText}
         filteredCount={filtered.length} totalCount={count} page={page} pageSize={PAGE_SIZE}
         selectedCount={selected.size}
+        resultStatus={loading ? 'Loading guests…' : loadError ? 'Results unavailable' : undefined}
         inputRef={inputRef} onQueryChange={setQuery}
         sort={sort} onSortChange={setSort}
         registeredFrom={registeredFrom} registeredTo={registeredTo}
@@ -349,22 +355,22 @@ export default function GuestsPage() {
       />
 
       <div className="flex-1 overflow-auto">
-        <GuestTable
-          guests={filtered} loading={loading} query={query}
-          selected={selected} deleting={deleting} showPhone={isSuperAdmin}
+        {loadError ? <AdminLoadError message={loadError} onRetry={() => setReloadGuests((value) => value + 1)} /> : <GuestTable
+          guests={filtered} loading={loading} query={query || registeredFrom || registeredTo}
+          selected={selected} deleting={deleting} showPhone={isSuperAdmin} canManage={canManage}
           onToggleAll={toggleAll} onToggleSelect={toggleSelect}
-          onDelete={handleDelete} onClearQuery={() => setQuery('')}
-        />
+          onDelete={handleDelete} onClearQuery={() => { setQuery(''); setSort(''); setRegisteredFrom(''); setRegisteredTo('') }}
+        />}
       </div>
 
-      {count > 0 && (
-        <div className="flex flex-shrink-0 items-center justify-between px-5 py-3"
+      {!loadError && !loading && count > 0 && (
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 px-5 py-3"
           style={{ borderTop: '1px solid var(--line)', background: 'var(--sidebar)' }}>
           <p className="text-xs" style={{ color: 'var(--muted)' }}>
             Page {page} of {totalPages} · {count} guests
           </p>
           <div className="flex items-center gap-1">
-            <button onClick={() => setPage(1)} disabled={page === 1}
+            <button onClick={() => setPage(1)} aria-label="First page" disabled={page === 1}
               className="rounded px-2 py-1 text-xs transition disabled:opacity-30"
               style={{ color: 'var(--muted)', border: '1px solid var(--line)' }}>«</button>
             <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
@@ -393,7 +399,7 @@ export default function GuestsPage() {
             <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
               className="rounded px-2.5 py-1 text-xs transition disabled:opacity-30"
               style={{ color: 'var(--muted)', border: '1px solid var(--line)' }}>Next ›</button>
-            <button onClick={() => setPage(totalPages)} disabled={page === totalPages}
+            <button onClick={() => setPage(totalPages)} aria-label="Last page" disabled={page === totalPages}
               className="rounded px-2 py-1 text-xs transition disabled:opacity-30"
               style={{ color: 'var(--muted)', border: '1px solid var(--line)' }}>»</button>
           </div>

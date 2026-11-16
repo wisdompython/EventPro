@@ -6,6 +6,8 @@ import { AuthUser } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { ADMIN_NAV, NavIcon } from './AdminNavigation'
 import { OrganizationSwitcher } from './OrganizationSwitcher'
+import { useRef } from 'react'
+import { useModalDialog } from './useModalDialog'
 
 interface Props {
   user: AuthUser
@@ -19,20 +21,21 @@ interface Props {
 export function MobileNav({ user, logout, open, onClose, pendingHref, onNavigate }: Props) {
   const pathname = usePathname()
   const { can } = useAuth()
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  useModalDialog(dialogRef, open)
   const initial = (user.first_name?.[0] || user.username[0]).toUpperCase()
   const displayName = user.first_name ? `${user.first_name} ${user.last_name}`.trim() : user.username
   if (!open) return null
 
   return (
-    <>
-      <button className="admin-mobile-backdrop" onClick={onClose} aria-label="Close navigation" />
+    <dialog ref={dialogRef} className="admin-mobile-dialog" aria-label="Event Pro navigation" onCancel={(event) => { event.preventDefault(); onClose() }} onPointerDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <aside className="admin-mobile-nav">
         <div className="admin-mobile-nav__head">
           <Link href="/admin/today" onClick={() => { onNavigate('/admin/today', 'Today'); onClose() }}><span>EP</span><b>Event Pro</b></Link>
-          <button onClick={onClose} aria-label="Close navigation">×</button>
+          <button autoFocus onClick={onClose} aria-label="Close navigation">×</button>
         </div>
         <div className="admin-workspace-card"><p>Current workspace</p><OrganizationSwitcher compact tone="dark" /></div>
-        <nav className="admin-sidebar__nav">
+        <nav className="admin-sidebar__nav" aria-label="Event Pro navigation">
           {ADMIN_NAV.map((section) => {
             const visible = section.items.filter((item) =>
               (!item.minRole || can(item.minRole)) && (!item.platformOnly || user.is_platform_admin)
@@ -44,7 +47,7 @@ export function MobileNav({ user, logout, open, onClose, pendingHref, onNavigate
                 {visible.map((item) => {
                   const active = pathname === item.href || (item.href !== '/admin/today' && pathname.startsWith(`${item.href}/`))
                   const pending = pendingHref === item.href
-                  return <Link key={item.href} href={item.href} onClick={() => { onNavigate(item.href, item.label); onClose() }} className={`${active ? 'is-active' : ''}${pending ? ' is-pending' : ''}`} aria-busy={pending || undefined}><NavIcon name={item.icon}/><span>{item.label}</span>{pending ? <i className="admin-nav-spinner" aria-hidden="true" /> : active && <i className="admin-nav-current" />}</Link>
+                  return <Link key={item.href} href={item.href} onClick={() => { onNavigate(item.href, item.label); onClose() }} className={`${active ? 'is-active' : ''}${pending ? ' is-pending' : ''}`} aria-current={active ? 'page' : undefined} aria-busy={pending || undefined}><NavIcon name={item.icon}/><span>{item.label}</span>{pending ? <i className="admin-nav-spinner" aria-hidden="true" /> : active && <i className="admin-nav-current" />}</Link>
                 })}
               </div>
             )
@@ -55,6 +58,6 @@ export function MobileNav({ user, logout, open, onClose, pendingHref, onNavigate
           <button onClick={() => { logout(); onClose() }} aria-label="Sign out">↗</button>
         </div>
       </aside>
-    </>
+    </dialog>
   )
 }

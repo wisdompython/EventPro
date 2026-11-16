@@ -25,6 +25,7 @@ interface Props {
   page: number
   pageSize: number
   selectedCount: number
+  resultStatus?: string
   inputRef: RefObject<HTMLInputElement | null>
   onQueryChange: (q: string) => void
   sort: GuestSortKey
@@ -38,7 +39,7 @@ interface Props {
 }
 
 export function GuestFilterBar({
-  tokens, freeText, filteredCount, totalCount, page, pageSize, selectedCount, inputRef, onQueryChange,
+  tokens, freeText, filteredCount, totalCount, page, pageSize, selectedCount, resultStatus, inputRef, onQueryChange,
   sort, onSortChange, registeredFrom, registeredTo, onRegisteredFromChange, onRegisteredToChange,
   ticketTypes, hasRsvp,
 }: Props) {
@@ -69,8 +70,8 @@ export function GuestFilterBar({
   return (
     <div className="flex flex-shrink-0 flex-col gap-2.5 px-4 py-3"
       style={{ borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
-      <div className="flex items-center gap-3">
-        <div className="flex min-w-[280px] flex-1 items-center gap-2 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-[var(--brand-soft)]"
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-[var(--brand)]"
           style={{ border: '1px solid var(--line-strong)', background: 'var(--field)' }}>
           <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"
             style={{ color: 'var(--muted)', flexShrink: 0 }}>
@@ -95,7 +96,7 @@ export function GuestFilterBar({
         </div>
 
         <div className="flex-shrink-0 text-xs tabular-nums" style={{ color: 'var(--muted)' }}>
-          {totalCount > 0 ? `${start}–${end} of ${totalCount}` : `${filteredCount} guests`}
+          {resultStatus || (totalCount > 0 ? `${start}–${end} of ${totalCount}` : `${filteredCount} guests`)}
           {selectedCount > 0 && ` · ${selectedCount} selected`}
         </div>
       </div>
@@ -104,7 +105,7 @@ export function GuestFilterBar({
         <span className="self-center pr-1 text-xs font-semibold" style={{ color: 'var(--ink-2)' }}>Filter by</span>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Entry status</span>
+          <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Entry status</span>
           <select value={statusFilter} onChange={(e) => changeToken('status', e.target.value)}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-soft)]"
             style={{ border: '1px solid var(--line)', background: 'var(--field)', color: 'var(--ink)' }}>
@@ -115,7 +116,7 @@ export function GuestFilterBar({
         </label>
 
         {hasRsvp && <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>RSVP state</span>
+          <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>RSVP state</span>
           <select value={rsvpFilter} onChange={(e) => changeToken('rsvp', e.target.value)}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-soft)]"
             style={{ border: '1px solid var(--line)', background: 'var(--field)', color: 'var(--ink)' }}>
@@ -128,7 +129,7 @@ export function GuestFilterBar({
         </label>}
 
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Ticket</span>
+          <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Ticket</span>
           <select value={ticketFilter} onChange={(e) => changeToken('ticket', e.target.value)}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-soft)]"
             style={{ border: '1px solid var(--line)', background: 'var(--field)', color: 'var(--ink)' }}>
@@ -138,7 +139,7 @@ export function GuestFilterBar({
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>WhatsApp delivery</span>
+          <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>WhatsApp delivery</span>
           <select value={whatsappFilter} onChange={(e) => changeToken('wa', e.target.value)}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-soft)]"
             style={{ border: '1px solid var(--line)', background: 'var(--field)', color: 'var(--ink)' }}>
@@ -164,16 +165,16 @@ export function GuestFilterBar({
         </button>
 
         <div className="flex flex-col gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Registration date</span>
+          <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Registration date</span>
           <div className="flex items-center gap-1.5">
-            <label className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--muted)' }}>
+            <label className="flex items-center gap-1 text-[12px]" style={{ color: 'var(--muted)' }}>
               <span>From</span>
               <input type="date" value={registeredFrom} onChange={(e) => onRegisteredFromChange(e.target.value)}
                 aria-label="Registered from date"
                 className="rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[var(--brand-soft)]"
                 style={{ border: '1px solid var(--line)', background: 'var(--field)', color: 'var(--ink)' }} />
             </label>
-            <label className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--muted)' }}>
+            <label className="flex items-center gap-1 text-[12px]" style={{ color: 'var(--muted)' }}>
               <span>To</span>
               <input type="date" value={registeredTo} onChange={(e) => onRegisteredToChange(e.target.value)}
                 aria-label="Registered to date"
@@ -184,7 +185,7 @@ export function GuestFilterBar({
         </div>
 
         <label className="ml-auto flex flex-col gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Sort by</span>
+          <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Sort by</span>
           <select value={sort} onChange={(e) => onSortChange(e.target.value as GuestSortKey)}
             className="rounded-md px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-soft)]"
             style={{ border: '1px solid var(--line)', background: 'var(--field)', color: 'var(--ink)' }}>

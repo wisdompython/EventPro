@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useId, useRef } from 'react'
+import { useModalDialog } from './useModalDialog'
 
 /**
  * In-app confirmation for destructive actions.
@@ -38,39 +39,33 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: Props) {
-  const confirmRef = useRef<HTMLButtonElement>(null)
-
-  // Focus the confirming button so the dialog is keyboard-usable immediately,
-  // and close on Escape from anywhere.
-  useEffect(() => {
-    confirmRef.current?.focus()
-    function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') onCancel()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+  const descriptionId = useId()
+  useModalDialog(dialogRef)
 
   return (
-    <div
+    <dialog
+      ref={dialogRef}
       className="admin-confirm"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="admin-confirm-title"
+      aria-labelledby={titleId}
+      aria-describedby={body ? descriptionId : undefined}
+      onCancel={(event) => { event.preventDefault(); onCancel() }}
       onPointerDown={(event) => {
         // A click on the backdrop dismisses, the same as Cancel.
         if (event.target === event.currentTarget) onCancel()
       }}
     >
       <div className="admin-confirm__panel">
-        <h2 id="admin-confirm-title">{title}</h2>
-        {body && <p>{body}</p>}
+        <h2 id={titleId}>{title}</h2>
+        {body && <p id={descriptionId}>{body}</p>}
         <div className="admin-confirm__actions">
-          <button type="button" className="admin-secondary-action" onClick={onCancel}>
+          <button autoFocus type="button" className="admin-secondary-action" onClick={onCancel}>
             {cancelLabel}
           </button>
           <button
-            ref={confirmRef}
             type="button"
             className={destructive ? 'admin-danger-action' : 'admin-primary-action'}
             onClick={() => { onConfirm(); onCancel() }}
@@ -79,7 +74,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   )
 }
 
